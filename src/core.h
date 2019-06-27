@@ -71,6 +71,13 @@ class Core : public GlobAlloc {
         g_string name;
 
     public:
+
+        enum CoreType {
+            Null,
+            Simple,
+            Timing,
+            OOO,
+        };
         explicit Core(g_string& _name) : lastUpdateCycles(0), lastUpdateInstrs(0), name(_name) {}
 
         virtual uint64_t getInstrs() const = 0; // typically used to find out termination conditions or dumps
@@ -83,6 +90,11 @@ class Core : public GlobAlloc {
         //Called by scheduler on every leave and join action, before barrier methods are called
         virtual void leave() {}
         virtual void join() {}
+
+        virtual CoreType type() const = 0;
+
+        virtual void cSimStart() = 0;
+        virtual void cSimEnd() = 0;
 
         virtual InstrFuncPtrs GetFuncPtrs() = 0;
 };

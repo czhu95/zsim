@@ -74,7 +74,7 @@ ProcInfo childInfo[MAX_CHILDREN];
 
 volatile uint32_t debuggerChildIdx = MAX_THREADS;
 
-GlobSimInfo* globzinfo = nullptr; //used very sparingly, only in sig handlers. Should probably promote to a global like in zsim processes.
+GlobSimInfo* globzinfo = NULL; //used very sparingly, only in sig handlers. Should probably promote to a global like in zsim processes.
 
 bool perProcessDir, aslr;
 
@@ -203,7 +203,7 @@ static uint64_t lastCycles = 0;
 
 static void printHeartbeat(GlobSimInfo* zinfo) {
     uint64_t cycles = zinfo->numPhases*zinfo->phaseLength;
-    time_t curTime = time(nullptr);
+    time_t curTime = time(NULL);
     time_t elapsedSecs = curTime - startTime;
     time_t heartbeatSecs = curTime - lastHeartbeatTime;
 
@@ -252,7 +252,7 @@ void LaunchProcess(uint32_t procIdx) {
             trace(Harness, " arg%d = %s", i, args[i].c_str());
             aptrs[i] = args[i].c_str();
         }
-        aptrs[nargs-1] = nullptr;
+        aptrs[nargs-1] = NULL;
 
         //Chdir to process dir if needed
         if (perProcessDir) {
@@ -312,9 +312,9 @@ int main(int argc, char *argv[]) {
         exit(0);
     }
 
-    InitLog("[H] ", nullptr /*log to stdout/err*/);
+    InitLog("[H] ", NULL /*log to stdout/err*/);
     info("Starting zsim, built %s (rev %s)", ZSIM_BUILDDATE, ZSIM_BUILDVERSION);
-    startTime = time(nullptr);
+    startTime = time(NULL);
 
     if (argc != 2) {
         info("Usage: %s config_file", argv[0]);
@@ -322,8 +322,8 @@ int main(int argc, char *argv[]) {
     }
 
     //Canonicalize paths --- because we change dirs, we deal in absolute paths
-    const char* configFile = realpath(argv[1], nullptr);
-    const char* outputDir = getcwd(nullptr, 0); //already absolute
+    const char* configFile = realpath(argv[1], NULL);
+    const char* outputDir = getcwd(NULL, 0); //already absolute
 
     Config conf(configFile);
 
@@ -341,10 +341,10 @@ int main(int argc, char *argv[]) {
     debugSa.sa_flags = SA_SIGINFO;
     sigemptyset(&debugSa.sa_mask); //NOTE: We might want to start using sigfullsets in other signal handlers to avoid races...
     debugSa.sa_sigaction = debugSigHandler;
-    if (sigaction(SIGUSR1, &debugSa, nullptr) != 0)
+    if (sigaction(SIGUSR1, &debugSa, NULL) != 0)
         panic("sigaction() failed");
 
-    waitid(P_ALL, 0, nullptr, WEXITED);
+    waitid(P_ALL, 0, NULL, WEXITED);
 
     //Remove all zsim.log.* files (we append to them, and want to avoid outputs from multiple simulations)
     uint32_t removedLogfiles = 0;
@@ -399,7 +399,7 @@ int main(int argc, char *argv[]) {
 
     //Wait for all processes to finish
     int sleepLength = 10;
-    GlobSimInfo* zinfo = nullptr;
+    GlobSimInfo* zinfo = NULL;
     int32_t secsStalled = 0;
 
     int64_t lastNumPhases = 0;
@@ -410,7 +410,7 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        if (zinfo == nullptr) {
+        if (zinfo == NULL) {
             zinfo = static_cast<GlobSimInfo*>(gm_get_glob_ptr());
             globzinfo = zinfo;
             info("Attached to global heap");
@@ -452,7 +452,7 @@ int main(int argc, char *argv[]) {
 
         //This solves a weird race in multiprocess where SIGCHLD does not always fire...
         int cpid = -1;
-        while ((cpid = waitpid(-1, nullptr, WNOHANG)) > 0) {
+        while ((cpid = waitpid(-1, NULL, WNOHANG)) > 0) {
             eraseChild(cpid);
             info("Child %d done (in-loop catch)", cpid);
         }

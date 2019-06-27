@@ -40,14 +40,17 @@ class TextBackendImpl : public GlobAlloc {
         void dumpStat(Stat* s, uint32_t level, std::ofstream* out) {
             for (uint32_t i = 0; i < level; i++) *out << " ";
             *out << s->name() << ": ";
-            if (AggregateStat* as = dynamic_cast<AggregateStat*>(s)) {
+            if (s->isAggregate()) {
+                AggregateStat* as = static_cast<AggregateStat*>(s);
                 *out << "# " << as->desc() << endl;
                 for (uint32_t i = 0; i < as->size(); i++) {
                     dumpStat(as->get(i), level+1, out);
                 }
-            } else if (ScalarStat* ss = dynamic_cast<ScalarStat*>(s)) {
+            } else if (s->isScalar()) {
+                ScalarStat* ss = static_cast<ScalarStat*>(s);
                 *out << ss->get() << " # " << ss->desc() << endl;
-            } else if (VectorStat* vs = dynamic_cast<VectorStat*>(s)) {
+            } else if (s->isVector()) {
+                VectorStat* vs = static_cast<VectorStat*>(s);
                 *out << "# " << vs->desc() << endl;
                 for (uint32_t i = 0; i < vs->size(); i++) {
                     for (uint32_t j = 0; j < level+1; j++) *out << " ";

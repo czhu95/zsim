@@ -42,24 +42,24 @@ struct InListNode {
     InList<T>* owner;
 
     InListNode() {
-        next = nullptr;
-        prev = nullptr;
-        owner = nullptr;
+        next = NULL;
+        prev = NULL;
+        owner = NULL;
     }
 
     void unlink(InList<T>* lst) {
         if (next) next->prev = prev;
         if (prev) prev->next = next;
-        next = nullptr;
-        prev = nullptr;
+        next = NULL;
+        prev = NULL;
         assert(lst == owner);
-        owner = nullptr;
+        owner = NULL;
     }
 
     void linkPrev(T* p, InList<T>* lst) {
         assert(p);
-        assert(owner == nullptr);
-        assert(prev == nullptr && next == nullptr);
+        assert(owner == NULL);
+        assert(prev == NULL && next == NULL);
         if (p->next) {
             assert(p->next->prev == p);
             p->next->prev = static_cast<T*>(this);
@@ -79,19 +79,19 @@ class InList {
         size_t elems;
 
     public:
-        InList() : head(nullptr), tail(nullptr), elems(0) {}
+        InList() : head(NULL), tail(NULL), elems(0) {}
         bool empty() const {return !head;}
 
         T* front() const {return head;}
         T* back() const {return tail;}
 
         void push_front(T* e) {
-            assert(e && e->next == nullptr && e->prev == nullptr && e->owner == nullptr);
+            assert(e && e->next == NULL && e->prev == NULL && e->owner == NULL);
             if (empty()) {
                 head = e;
                 tail = e;
             } else {
-                assert(head && head->prev == nullptr && head->owner == this);
+                assert(head && head->prev == NULL && head->owner == this);
                 e->next = head;
                 head->prev = e;
                 head = e;
@@ -101,7 +101,7 @@ class InList {
         }
 
         void push_back(T* e) {
-            assert(e && e->next == nullptr && e->prev == nullptr && e->owner == nullptr);
+            assert(e && e->next == NULL && e->prev == NULL && e->owner == NULL);
             if (empty()) {
                 head = e;
                 tail = e;
@@ -119,7 +119,7 @@ class InList {
             T* e = head;
             head = e->next;
             e->unlink(this);
-            if (!head) tail = nullptr;
+            if (!head) tail = NULL;
             elems--;
         }
 
@@ -128,7 +128,7 @@ class InList {
             T* e = tail;
             tail = e->prev;
             e->unlink(this);
-            if (!tail) head = nullptr;
+            if (!tail) head = NULL;
             elems--;
         }
 
@@ -143,7 +143,7 @@ class InList {
         }
 
         void insertAfter(T* prev, T* e) {
-            assert(e && e->owner == nullptr);
+            assert(e && e->owner == NULL);
             assert(prev && prev->owner == this);
             e->linkPrev(prev, this);
             if (prev == tail) tail = e;
@@ -157,7 +157,7 @@ class InList {
 #if 0  // Verify all internal state; call to test list implementation
         void verify() {
             if (empty()) {
-                assert(head == nullptr && tail == nullptr && elems == 0);
+                assert(head == NULL && tail == NULL && elems == 0);
             } else {
                 T* c = head;
                 size_t count = 0;

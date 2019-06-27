@@ -43,7 +43,7 @@ struct TimingRecord {
     TimingEvent* endEvent;
 
     bool isValid() const { return startEvent; }
-    void clear() { startEvent = nullptr; }
+    void clear() { startEvent = NULL; }
 };
 
 //class CoreRecorder;

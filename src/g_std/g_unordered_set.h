@@ -30,6 +30,6 @@
 #include <unordered_set>
 #include "g_std/stl_galloc.h"
 
-template <typename K> class g_unordered_set : public std::unordered_set<K, std::hash<K>, std::equal_to<K>, StlGlobAlloc<K> > {};
+template <typename K> class g_unordered_set : public std::tr1::unordered_set<K, std::hash<K>, std::equal_to<K>, StlGlobAlloc<K> > {};
 
 #endif  // G_UNORDERED_SET_H_

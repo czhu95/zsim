@@ -44,7 +44,7 @@ void InitLog(const char* header, const char* file) {
 
     if (file) {
         FILE* fd = fopen(file, "a");
-        if (fd == nullptr) {
+        if (fd == NULL) {
             perror("fopen() failed");
             panic("Could not open logfile %s", file); //we can panic in InitLog (will dump to stderr)
         }

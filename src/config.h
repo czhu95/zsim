@@ -26,6 +26,13 @@
 #ifndef CONFIG_H_
 #define CONFIG_H_
 
+
+#ifdef USE_LIBCONFIGXX
+#include <libconfig.h++>
+#else
+#include <libconfig.h>
+#endif
+
 /* Thin wrapper around libconfig to:
  * - Reduce and simplify init code (tailored interface, not type BS, ...)
  * - Strict config: type errors, warnings on unused variables, panic on different defaults
@@ -35,18 +42,27 @@
 #include <stdint.h>
 #include <string>
 #include <vector>
+#include <libconfig.h>
 #include "log.h"
 
+#ifdef USE_LIBCONFIGXX
 namespace libconfig {
     class Config;
-    class Setting;
 };
+#else
+struct config_t;
+#endif
 
 
 class Config {
     private:
-        libconfig::Config* inCfg;
-        libconfig::Config* outCfg;
+#ifdef USE_LIBCONFIGXX
+        libconfig::Config *inCfg;
+        libconfig::Config *outCfg;
+#else
+        struct config_t* inCfg;
+        struct config_t* outCfg;
+#endif
 
     public:
         explicit Config(const char* inFile);

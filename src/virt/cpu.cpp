@@ -56,22 +56,36 @@ void VirtGetcpu(uint32_t tid, uint32_t cpu, ADDRINT arg0, ADDRINT arg1) {
     if (arg1) safeCopy(&resNode, (unsigned*)arg1);
 }
 
-PostPatchFn PatchGetcpu(PrePatchArgs args) {
-    uint32_t cpu = cpuenumCpu(procIdx, getCid(args.tid));  // still valid, may become invalid when we leave()
-    assert(cpu != (uint32_t)-1);
-    return [cpu](PostPatchArgs args) {
+struct PatchGetcpuFunc : public PostPatchFunctor {
+    PatchGetcpuFunc(uint32_t cpu) : cpu(cpu) {}
+
+    PostPatchAction operator ()(PostPatchArgs args) override {
         trace(TimeVirt, "[%d] Post-patching SYS_getcpu", args.tid);
         ADDRINT arg0 = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
         ADDRINT arg1 = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
         VirtGetcpu(args.tid, cpu, arg0, arg1);
         return PPA_NOTHING;
-    };
+    }
+
+    uint32_t cpu;
+};
+
+
+PostPatchFn PatchGetcpu(PrePatchArgs args) {
+    uint32_t cpu = cpuenumCpu(procIdx, getCid(args.tid));  // still valid, may become invalid when we leave()
+    assert(cpu != (uint32_t)-1);
+    return new PatchGetcpuFunc(cpu);
+    // return [cpu](PostPatchArgs args) {
+    //     trace(TimeVirt, "[%d] Post-patching SYS_getcpu", args.tid);
+    //     ADDRINT arg0 = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
+    //     ADDRINT arg1 = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
+    //     VirtGetcpu(args.tid, cpu, arg0, arg1);
+    //     return PPA_NOTHING;
+    // };
 }
 
-// Scheduler affinity
-
-PostPatchFn PatchSchedGetaffinity(PrePatchArgs args) {
-    return [](PostPatchArgs args) {
+struct PatchSchedGetaffinityFunc : public PostPatchFunctor {
+    PostPatchAction operator ()(PostPatchArgs args) override {
         uint32_t linuxTid = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
         uint32_t tid = (linuxTid == 0 ? args.tid : zinfo->sched->getTidFromLinuxTid(linuxTid));
         if (tid == (uint32_t)-1) {
@@ -89,8 +103,48 @@ PostPatchFn PatchSchedGetaffinity(PrePatchArgs args) {
         }
         info("[%d] Post-patching SYS_sched_getaffinity size %d cpuset %p", tid, size, set);
         return PPA_NOTHING;
-    };
+    }
+
+};
+
+// Scheduler affinity
+
+PostPatchFn PatchSchedGetaffinity(PrePatchArgs args) {
+    return new PatchSchedGetaffinityFunc();
+    // return [](PostPatchArgs args) {
+    //     uint32_t linuxTid = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
+    //     uint32_t tid = (linuxTid == 0 ? args.tid : zinfo->sched->getTidFromLinuxTid(linuxTid));
+    //     if (tid == (uint32_t)-1) {
+    //         warn("SYS_sched_getaffinity cannot find thread with OS id %u, ignored", linuxTid);
+    //         return PPA_NOTHING;
+    //     }
+    //     uint32_t size = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
+    //     cpu_set_t* set = (cpu_set_t*)PIN_GetSyscallArgument(args.ctxt, args.std, 2);
+    //     if (set) { //TODO: use SafeCopy, this can still segfault
+    //         CPU_ZERO_S(size, set);
+    //         std::vector<bool> cpumask = cpuenumMask(procIdx, tid);
+    //         for (uint32_t i = 0; i < MIN(cpumask.size(), size*8 /*size is in bytes, supports 1 cpu/bit*/); i++) {
+    //             if (cpumask[i]) CPU_SET_S(i, (size_t)size, set);
+    //         }
+    //     }
+    //     info("[%d] Post-patching SYS_sched_getaffinity size %d cpuset %p", tid, size, set);
+    //     return PPA_NOTHING;
+    // };
 }
+
+struct PatchSchedSetaffinityOnSuccess : public PostPatchFunctor {
+    PostPatchAction operator ()(PostPatchArgs args) override {
+        PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)0);  // return 0 on success
+        return PPA_USE_JOIN_PTRS;
+    }
+};
+
+struct PatchSchedSetaffinityOnFail : public PostPatchFunctor {
+    PostPatchAction operator ()(PostPatchArgs args) override {
+        PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EPERM);
+        return PPA_NOTHING;
+    }
+};
 
 PostPatchFn PatchSchedSetaffinity(PrePatchArgs args) {
     uint32_t linuxTid = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
@@ -98,10 +152,11 @@ PostPatchFn PatchSchedSetaffinity(PrePatchArgs args) {
     if (tid == (uint32_t)-1) {
         warn("SYS_sched_getaffinity cannot find thread with OS id %u, ignored!", linuxTid);
         PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT) SYS_getpid);  // squash
-        return [](PostPatchArgs args) {
-            PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EPERM);
-            return PPA_NOTHING;
-        };
+        return new PatchSchedSetaffinityOnFail();
+        // return [](PostPatchArgs args) {
+        //     PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EPERM);
+        //     return PPA_NOTHING;
+        // };
     }
     uint32_t size = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
     cpu_set_t* set = (cpu_set_t*)PIN_GetSyscallArgument(args.ctxt, args.std, 2);
@@ -114,9 +169,10 @@ PostPatchFn PatchSchedSetaffinity(PrePatchArgs args) {
         cpuenumUpdateMask(procIdx, tid, cpumask);
     }
     PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT) SYS_getpid);  // squash
-    return [](PostPatchArgs args) {
-        PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)0);  // return 0 on success
-        return PPA_USE_JOIN_PTRS;
-    };
+    return new PatchSchedSetaffinityOnSuccess();
+    // return [](PostPatchArgs args) {
+    //     PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)0);  // return 0 on success
+    //     return PPA_USE_JOIN_PTRS;
+    // };
 }
 

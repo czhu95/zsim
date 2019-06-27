@@ -57,6 +57,11 @@ class SimpleCore : public Core {
 
         InstrFuncPtrs GetFuncPtrs();
 
+        void cSimStart() override {}
+        void cSimEnd() override {}
+
+        CoreType type() const override { return Simple; }
+
     protected:
         //Simulation functions
         inline void load(Address addr);

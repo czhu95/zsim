@@ -62,8 +62,10 @@ class TimingCore : public Core {
 
         //Contention simulation interface
         inline EventRecorder* getEventRecorder() {return cRec.getEventRecorder();}
-        void cSimStart() {curCycle = cRec.cSimStart(curCycle);}
-        void cSimEnd() {curCycle = cRec.cSimEnd(curCycle);}
+        void cSimStart() override {curCycle = cRec.cSimStart(curCycle);}
+        void cSimEnd() override {curCycle = cRec.cSimEnd(curCycle);}
+
+        CoreType type() const override { return Timing; }
 
     private:
         inline void loadAndRecord(Address addr);

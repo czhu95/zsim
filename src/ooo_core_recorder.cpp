@@ -87,7 +87,7 @@ class OOORespEvent : public TimingEvent {
 
         void simulate(uint64_t _startCycle) {
             TRACE_MSG("Resp %ld startCycle %ld minStartCycle %ld", id, startCycle, getMinStartCycle());
-            cRec = nullptr;
+            cRec = NULL;
             done(_startCycle);
         }
 
@@ -113,7 +113,7 @@ OOOCoreRecorder::OOOCoreRecorder(uint32_t _domain, g_string& _name)
 
     curId = 0;
 
-    lastEvProduced = nullptr;
+    lastEvProduced = NULL;
     lastEvSimulatedZllStartCycle = 0;
     lastEvSimulatedStartCycle = 0;
 }
@@ -339,7 +339,7 @@ uint64_t OOOCoreRecorder::cSimEnd(uint64_t curCycle) {
     for (FutureResponse& fr : GetPrioQueueContainer(futureResponses)) {
         if (fr.ev && fr.ev->cRec != this) {
             //info("Removed already-simulated response");
-            fr.ev = nullptr;
+            fr.ev = NULL;
         }
     }
 
@@ -358,7 +358,7 @@ uint64_t OOOCoreRecorder::cSimEnd(uint64_t curCycle) {
 void OOOCoreRecorder::reportIssueEventSimulated(OOOIssueEvent* ev, uint64_t startCycle) {
     lastEvSimulatedZllStartCycle = ev->zllStartCycle;
     lastEvSimulatedStartCycle = startCycle;
-    if (lastEvProduced == ev) lastEvProduced = nullptr;
+    if (lastEvProduced == ev) lastEvProduced = NULL;
     eventRecorder.setStartSlack(startCycle - ev->zllStartCycle);
 }
 

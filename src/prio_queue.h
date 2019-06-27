@@ -35,7 +35,7 @@ class PrioQueue {
         uint64_t occ; // bit i is 1 if array[i] is populated
 
         PQBlock() {
-            for (uint32_t i = 0; i < 64; i++) array[i] = nullptr;
+            for (uint32_t i = 0; i < 64; i++) array[i] = NULL;
             occ = 0;
         }
 
@@ -48,7 +48,7 @@ class PrioQueue {
             if (!next) occ ^= 1L << pos;
             assert(res);
             offset = pos;
-            res->next = nullptr;
+            res->next = NULL;
             return res;
         }
 

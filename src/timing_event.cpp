@@ -25,7 +25,6 @@
 
 #include "timing_event.h"
 #include <sstream>
-#include <typeinfo>
 #include "contention_sim.h"
 #include "zsim.h"
 
@@ -57,7 +56,7 @@ void TimingEvent::requeue(uint64_t nextCycle) {
 
 void TimingEvent::produceCrossings(EventRecorder* evRec) {
     assert(domain != -1);
-    //assert(dynamic_cast<CrossingEvent*>(this) == nullptr); //careful, expensive...
+    //assert(dynamic_cast<CrossingEvent*>(this) == NULL); //careful, expensive...
     auto pcLambda = [this, evRec](TimingEvent** childPtr) {
         TimingEvent* c = *childPtr;
         if (c->domain != domain) *childPtr = handleCrossing(c, evRec, true);
@@ -72,7 +71,7 @@ TimingEvent* TimingEvent::handleCrossing(TimingEvent* childEv, EventRecorder* ev
         childEv->numParents--;
     }
     assert_msg(minStartCycle != ((uint64_t)-1L), "Crossing domain (%d -> %d), but parent's minStartCycle is not set (my class: %s)",
-            domain, childEv->domain, typeid(*this).name()); //we can only handle a crossing if this has been set
+            domain, childEv->domain, type().c_str()); //we can only handle a crossing if this has been set
     CrossingEvent* xe = new (evRec) CrossingEvent(this, childEv, minStartCycle+postDelay, evRec);
     return xe->getSrcDomainEvent();
 }
@@ -112,7 +111,7 @@ CrossingEvent::CrossingEvent(TimingEvent* parent, TimingEvent* child, uint64_t _
     minStartCycle = _minStartCycle;
     origStartCycle = minStartCycle - evRec->getGapCycles();
     //queue(MAX(zinfo->contentionSim->getLastLimit(), minStartCycle)); //this initial queue always works --- 0 parents
-    //childCrossing = nullptr;
+    //childCrossing = NULL;
     zinfo->contentionSim->enqueueCrossing(this, MAX(zinfo->contentionSim->getLastLimit(), minStartCycle), evRec->getSourceId(), srcDomain, child->domain, evRec);
 }
 

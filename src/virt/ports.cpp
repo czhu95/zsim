@@ -33,14 +33,92 @@
 
 // Helper function
 static struct sockaddr_in* GetSockAddr(ADDRINT guestAddr, size_t guestSize) {
-    if (guestSize != sizeof(struct sockaddr_in)) return nullptr;
+    if (guestSize != sizeof(struct sockaddr_in)) return NULL;
     struct sockaddr_in* res = (struct sockaddr_in*) malloc(sizeof(struct sockaddr_in));
     if (!safeCopy((struct sockaddr_in*) guestAddr, res) || res->sin_family != AF_INET) {
         free(res);
-        return nullptr;
+        return NULL;
     }
     return res;
 }
+
+struct PatchBindFunc : public PostPatchFunctor {
+    PatchBindFunc(ADDRINT sAddrPtr) : sAddrPtr(sAddrPtr) {}
+
+    PostPatchAction operator ()(PostPatchArgs args) override {
+        struct sockaddr_in* servAddr = (struct sockaddr_in*) PIN_GetSyscallArgument(args.ctxt, args.std, 1);
+        int virtPort = ntohs(((struct sockaddr_in*)sAddrPtr)->sin_port);
+
+        uint32_t portDomain = zinfo->procArray[procIdx]->getPortDomain();
+        REG out = (REG) PIN_GetSyscallNumber(args.ctxt, args.std);
+        if (out == 0) {
+            int sockfd = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
+            struct sockaddr_in sockName; //NOTE: sockaddr_in to sockaddr casts are fine
+            socklen_t sockLen = sizeof(sockName);
+            if (getsockname(sockfd, (struct sockaddr*)&sockName, &sockLen) != 0) {
+                panic("bind() succeeded, but getsockname() failed...");
+            }
+            int realPort = ntohs(sockName.sin_port);
+
+            info("Virtualized bind(), v: %d r: %d (domain %d)", virtPort, realPort, portDomain);
+            zinfo->portVirt[portDomain]->registerBind(virtPort, realPort);
+        } else {
+            info("bind(): tried to virtualize port, but bind() failed, not registering (domain %d)", portDomain);
+        }
+        zinfo->portVirt[portDomain]->unlock();  // note lock was in prepatch
+
+        // Restore original descriptor, free alloc
+        PIN_SetSyscallArgument(args.ctxt, args.std, 1, sAddrPtr);
+        free(servAddr);
+        return PPA_NOTHING;
+    }
+
+    ADDRINT sAddrPtr;
+};
+
+struct PatchGetsocknameFunc : public PostPatchFunctor {
+    PostPatchAction operator ()(PostPatchArgs args) override {
+        CONTEXT* ctxt = args.ctxt;
+        SYSCALL_STANDARD std = args.std;
+
+        REG out = (REG) PIN_GetSyscallNumber(ctxt, std);
+        if (out == 0) {
+            ADDRINT sockAddrPtr = PIN_GetSyscallArgument(ctxt, std, 1);
+            struct sockaddr_in sockAddr;
+            //safecopy may fail here and that's OK, it's just not a sockaddr_in, so not IPv4
+            if (safeCopy((struct sockaddr_in*) sockAddrPtr, &sockAddr) && sockAddr.sin_family == AF_INET) {
+                int realPort = ntohs(sockAddr.sin_port);
+                uint32_t portDomain = zinfo->procArray[procIdx]->getPortDomain();
+                zinfo->portVirt[portDomain]->lock();
+                int virtPort = zinfo->portVirt[portDomain]->lookupVirt(realPort);
+                zinfo->portVirt[portDomain]->unlock();
+                if (virtPort != -1) {
+                    info("Virtualizing getsockname() on previously bound port, r: %d, v: %d (domain %d)", realPort, virtPort, portDomain);
+                    sockAddr.sin_port = htons(virtPort);
+                    if (!safeCopy(&sockAddr, (struct sockaddr_in*) sockAddrPtr)) {
+                        panic("getsockname() virt fail");
+                    }
+                }
+            }
+        } //else this failed, no need to virtualize
+        return PPA_NOTHING;
+    }
+};
+
+struct PatchConnectFunc : public PostPatchFunctor {
+    PatchConnectFunc(ADDRINT sAddrPtr, struct sockaddr_in *servAddr)
+        : sAddrPtr(sAddrPtr), servAddr(servAddr) {}
+
+    PostPatchAction operator ()(PostPatchArgs args) override {
+        //Restore original (virt) port (NOTE: regardless of whether connect() succeeded or not)
+        PIN_SetSyscallArgument(args.ctxt, args.std, 1, sAddrPtr);
+        free(servAddr);
+        return PPA_NOTHING;
+    }
+
+    ADDRINT sAddrPtr;
+    struct sockaddr_in *servAddr;
+};
 
 // Patch functions
 
@@ -70,33 +148,34 @@ PostPatchFn PatchBind(PrePatchArgs args) {
         }
         PIN_SetSyscallArgument(ctxt, std, 1, (ADDRINT) servAddr);
 
-        auto postFn = [sAddrPtr](PostPatchArgs args) {
-            struct sockaddr_in* servAddr = (struct sockaddr_in*) PIN_GetSyscallArgument(args.ctxt, args.std, 1);
-            int virtPort = ntohs(((struct sockaddr_in*)sAddrPtr)->sin_port);
+        // auto postFn = [sAddrPtr](PostPatchArgs args) {
+        //     struct sockaddr_in* servAddr = (struct sockaddr_in*) PIN_GetSyscallArgument(args.ctxt, args.std, 1);
+        //     int virtPort = ntohs(((struct sockaddr_in*)sAddrPtr)->sin_port);
 
-            uint32_t portDomain = zinfo->procArray[procIdx]->getPortDomain();
-            REG out = (REG) PIN_GetSyscallNumber(args.ctxt, args.std);
-            if (out == 0) {
-                int sockfd = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
-                struct sockaddr_in sockName; //NOTE: sockaddr_in to sockaddr casts are fine
-                socklen_t sockLen = sizeof(sockName);
-                if (getsockname(sockfd, (struct sockaddr*)&sockName, &sockLen) != 0) {
-                    panic("bind() succeeded, but getsockname() failed...");
-                }
-                int realPort = ntohs(sockName.sin_port);
+        //     uint32_t portDomain = zinfo->procArray[procIdx]->getPortDomain();
+        //     REG out = (REG) PIN_GetSyscallNumber(args.ctxt, args.std);
+        //     if (out == 0) {
+        //         int sockfd = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
+        //         struct sockaddr_in sockName; //NOTE: sockaddr_in to sockaddr casts are fine
+        //         socklen_t sockLen = sizeof(sockName);
+        //         if (getsockname(sockfd, (struct sockaddr*)&sockName, &sockLen) != 0) {
+        //             panic("bind() succeeded, but getsockname() failed...");
+        //         }
+        //         int realPort = ntohs(sockName.sin_port);
 
-                info("Virtualized bind(), v: %d r: %d (domain %d)", virtPort, realPort, portDomain);
-                zinfo->portVirt[portDomain]->registerBind(virtPort, realPort);
-            } else {
-                info("bind(): tried to virtualize port, but bind() failed, not registering (domain %d)", portDomain);
-            }
-            zinfo->portVirt[portDomain]->unlock();  // note lock was in prepatch
+        //         info("Virtualized bind(), v: %d r: %d (domain %d)", virtPort, realPort, portDomain);
+        //         zinfo->portVirt[portDomain]->registerBind(virtPort, realPort);
+        //     } else {
+        //         info("bind(): tried to virtualize port, but bind() failed, not registering (domain %d)", portDomain);
+        //     }
+        //     zinfo->portVirt[portDomain]->unlock();  // note lock was in prepatch
 
-            // Restore original descriptor, free alloc
-            PIN_SetSyscallArgument(args.ctxt, args.std, 1, sAddrPtr);
-            free(servAddr);
-            return PPA_NOTHING;
-        };
+        //     // Restore original descriptor, free alloc
+        //     PIN_SetSyscallArgument(args.ctxt, args.std, 1, sAddrPtr);
+        //     free(servAddr);
+        //     return PPA_NOTHING;
+        // };
+        PostPatchFn postFn = new PatchBindFunc(sAddrPtr);
         return postFn;
     } else {
         free(servAddr);
@@ -105,32 +184,33 @@ PostPatchFn PatchBind(PrePatchArgs args) {
 }
 
 PostPatchFn PatchGetsockname(PrePatchArgs args) {
-    return [](PostPatchArgs args) {
-        CONTEXT* ctxt = args.ctxt;
-        SYSCALL_STANDARD std = args.std;
+    return new PatchGetsocknameFunc();
+    // return [](PostPatchArgs args) {
+    //     CONTEXT* ctxt = args.ctxt;
+    //     SYSCALL_STANDARD std = args.std;
 
-        REG out = (REG) PIN_GetSyscallNumber(ctxt, std);
-        if (out == 0) {
-            ADDRINT sockAddrPtr = PIN_GetSyscallArgument(ctxt, std, 1);
-            struct sockaddr_in sockAddr;
-            //safecopy may fail here and that's OK, it's just not a sockaddr_in, so not IPv4
-            if (safeCopy((struct sockaddr_in*) sockAddrPtr, &sockAddr) && sockAddr.sin_family == AF_INET) {
-                int realPort = ntohs(sockAddr.sin_port);
-                uint32_t portDomain = zinfo->procArray[procIdx]->getPortDomain();
-                zinfo->portVirt[portDomain]->lock();
-                int virtPort = zinfo->portVirt[portDomain]->lookupVirt(realPort);
-                zinfo->portVirt[portDomain]->unlock();
-                if (virtPort != -1) {
-                    info("Virtualizing getsockname() on previously bound port, r: %d, v: %d (domain %d)", realPort, virtPort, portDomain);
-                    sockAddr.sin_port = htons(virtPort);
-                    if (!safeCopy(&sockAddr, (struct sockaddr_in*) sockAddrPtr)) {
-                        panic("getsockname() virt fail");
-                    }
-                }
-            }
-        } //else this failed, no need to virtualize
-        return PPA_NOTHING;
-    };
+    //     REG out = (REG) PIN_GetSyscallNumber(ctxt, std);
+    //     if (out == 0) {
+    //         ADDRINT sockAddrPtr = PIN_GetSyscallArgument(ctxt, std, 1);
+    //         struct sockaddr_in sockAddr;
+    //         //safecopy may fail here and that's OK, it's just not a sockaddr_in, so not IPv4
+    //         if (safeCopy((struct sockaddr_in*) sockAddrPtr, &sockAddr) && sockAddr.sin_family == AF_INET) {
+    //             int realPort = ntohs(sockAddr.sin_port);
+    //             uint32_t portDomain = zinfo->procArray[procIdx]->getPortDomain();
+    //             zinfo->portVirt[portDomain]->lock();
+    //             int virtPort = zinfo->portVirt[portDomain]->lookupVirt(realPort);
+    //             zinfo->portVirt[portDomain]->unlock();
+    //             if (virtPort != -1) {
+    //                 info("Virtualizing getsockname() on previously bound port, r: %d, v: %d (domain %d)", realPort, virtPort, portDomain);
+    //                 sockAddr.sin_port = htons(virtPort);
+    //                 if (!safeCopy(&sockAddr, (struct sockaddr_in*) sockAddrPtr)) {
+    //                     panic("getsockname() virt fail");
+    //                 }
+    //             }
+    //         }
+    //     } //else this failed, no need to virtualize
+    //     return PPA_NOTHING;
+    // };
 }
 
 PostPatchFn PatchConnect(PrePatchArgs args) {
@@ -152,12 +232,13 @@ PostPatchFn PatchConnect(PrePatchArgs args) {
         servAddr->sin_port = htons(realPort);
         PIN_SetSyscallArgument(ctxt, std, 1, (ADDRINT) servAddr);
 
-        auto postFn = [sAddrPtr, servAddr](PostPatchArgs args) {
-            //Restore original (virt) port (NOTE: regardless of whether connect() succeeded or not)
-            PIN_SetSyscallArgument(args.ctxt, args.std, 1, sAddrPtr);
-            free(servAddr);
-            return PPA_NOTHING;
-        };
+        // auto postFn = [sAddrPtr, servAddr](PostPatchArgs args) {
+        //     //Restore original (virt) port (NOTE: regardless of whether connect() succeeded or not)
+        //     PIN_SetSyscallArgument(args.ctxt, args.std, 1, sAddrPtr);
+        //     free(servAddr);
+        //     return PPA_NOTHING;
+        // };
+        PostPatchFn postFn = new PatchConnectFunc(sAddrPtr, servAddr);
         return postFn;
     } else {
         free(servAddr);

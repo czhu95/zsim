@@ -29,8 +29,10 @@
 #define LOG_H_
 
 #include <sstream>
+#include <string>
 #include <stdio.h>
 #include <stdlib.h>
+#include <assert.h>
 
 void __log_lock();
 void __log_unlock();
@@ -69,9 +71,9 @@ extern FILE* logFdErr;
 /* Set per-process header for log/info/warn/panic messages
  * Calling this is not needed (the default header is ""),
  * but it helps in multi-process runs
- * If file is nullptr or InitLog is not called, logs to stdout/stderr
+ * If file is NULL or InitLog is not called, logs to stdout/stderr
  */
-void InitLog(const char* header, const char* file = nullptr);
+void InitLog(const char* header, const char* file = NULL);
 
 /* Helper class to print expression with values
  * Inpired by Phil Nash's CATCH, https://github.com/philsquared/Catch
@@ -108,11 +110,11 @@ class PrintExpr {
         template<typename T> const PrintExpr operator << (T t) const { ss << " << " << t; return *this; }
         template<typename T> const PrintExpr operator >> (T t) const { ss << " >> " << t; return *this; }
 
-        // std::nullptr_t overloads (for nullptr's in assertions)
-        // Only a few are needed, since most ops w/ nullptr are invalid
-        const PrintExpr operator->* (std::nullptr_t t) const { ss << "nullptr"; return *this; }
-        const PrintExpr operator == (std::nullptr_t t) const { ss << " == nullptr"; return *this; }
-        const PrintExpr operator != (std::nullptr_t t) const { ss << " != nullptr"; return *this; }
+        // std::NULL_t overloads (for NULL's in assertions)
+        // Only a few are needed, since most ops w/ NULL are invalid
+        // const PrintExpr operator->* (std::NULL_t t) const { ss << "NULL"; return *this; }
+        // const PrintExpr operator == (std::NULL_t t) const { ss << " == NULL"; return *this; }
+        // const PrintExpr operator != (std::NULL_t t) const { ss << " != NULL"; return *this; }
 
     private:
         template<typename T> const PrintExpr operator =  (T t) const;  // will fail, can't assign in assertion

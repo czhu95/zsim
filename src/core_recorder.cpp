@@ -52,7 +52,7 @@ class TimingCoreEvent : public TimingEvent {
 CoreRecorder::CoreRecorder(uint32_t _domain, g_string& _name)
     : domain(_domain), name(_name + "-rec")
 {
-    prevRespEvent = nullptr;
+    prevRespEvent = NULL;
     state = HALTED;
     gapCycles = 0;
     eventRecorder.setGapCycles(gapCycles);
@@ -222,7 +222,7 @@ void CoreRecorder::reportEventSimulated(TimingCoreEvent* ev) {
     if (unlikely(ev == prevRespEvent)) {
         // This is the last event in the sequence
         assert(state == DRAINING);
-        prevRespEvent = nullptr;
+        prevRespEvent = NULL;
     }
     eventRecorder.setStartSlack(ev->startCycle - ev->origStartCycle);
 }

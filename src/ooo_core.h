@@ -451,8 +451,10 @@ class OOOCore : public Core {
 
         // Contention simulation interface
         inline EventRecorder* getEventRecorder() {return cRec.getEventRecorder();}
-        void cSimStart();
-        void cSimEnd();
+        void cSimStart() override;
+        void cSimEnd() override;
+
+        CoreType type() const override { return OOO; }
 
     private:
         inline void load(Address addr);

@@ -29,6 +29,10 @@
 #include <linux/version.h>
 #include <sstream>
 #include <string>
+/* Don't know why wordexp.h declares __THROW, clearly it does not use
+ * exceptions from its source code.
+ * Define __THROW here so compiler won't complain. */
+#define __THROW
 #include <wordexp.h> //for posix-shell command expansion
 #include "config.h"
 #include "pin.H"
@@ -68,13 +72,13 @@ PinCmd::PinCmd(Config* conf, const char* configFile, const char* outputDir, uint
     }
     wordfree(&p);
 
-    if (PIN_PRODUCT_VERSION_MAJOR <= 2 && LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0)
-            && std::find(args.begin(), args.end(), "-injection") == args.end()) {
-        // FIXME(mgao): hack to bypass kernel version check in Pin 2.x.
-        // Parent injection.
-        args.push_back("-injection");
-        args.push_back("parent");
-    }
+    // if (PIN_PRODUCT_VERSION_MAJOR <= 2 && LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0)
+    //         && std::find(args.begin(), args.end(), "-injection") == args.end()) {
+    //     // FIXME(mgao): hack to bypass kernel version check in Pin 2.x.
+    //     // Parent injection.
+    //     args.push_back("-injection");
+    //     args.push_back("parent");
+    // }
 
     //Load tool
     args.push_back("-t");
@@ -84,7 +88,7 @@ PinCmd::PinCmd(Config* conf, const char* configFile, const char* outputDir, uint
     if (configFile) {
         //Check configFile is an absolute path
         //NOTE: We check rather than canonicalizing it ourselves because by the time we're created, we might be in another directory
-        char* absPath = realpath(configFile, nullptr);
+        char* absPath = realpath(configFile, NULL);
         if (std::string(configFile) != std::string(absPath)) {
             panic("Internal zsim bug, configFile should be absolute");
         }
@@ -164,7 +168,7 @@ g_vector<g_string> PinCmd::getFullCmdArgs(uint32_t procIdx, const char** inputFi
     wordfree(&p);
 
     //Input redirect
-    *inputFile = (procInfo[procIdx].input == "")? nullptr : procInfo[procIdx].input.c_str();
+    *inputFile = (procInfo[procIdx].input == "")? NULL : procInfo[procIdx].input.c_str();
     return res;
 }
 

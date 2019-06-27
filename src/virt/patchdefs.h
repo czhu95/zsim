@@ -30,31 +30,30 @@
 
 // File system -- fs.cpp
 PF(SYS_open, PatchOpen);
-PF(SYS_openat, PatchOpen);
-
-// Port virtualization -- ports.cpp
-PF(SYS_bind, PatchBind);
-PF(SYS_getsockname, PatchGetsockname);
-PF(SYS_connect, PatchConnect);
-
-// CPU virtualization -- cpu.cpp
-PF(SYS_getcpu, PatchGetcpu);
-PF(SYS_sched_getaffinity, PatchSchedGetaffinity);
-PF(SYS_sched_setaffinity, PatchSchedSetaffinity);
-
-
-// Conditional patches, only when not fast-forwarded
-
-// Time virtualization -- time.cpp
-PF(SYS_gettimeofday, PatchGettimeofday);
-PF(SYS_time, PatchTime);
-PF(SYS_clock_gettime, PatchClockGettime);
-PF(SYS_nanosleep, PatchNanosleep);
-PF(SYS_clock_nanosleep, PatchNanosleep);
-
-// Timeout virtualization -- timeout.cpp
-PF(SYS_futex, PatchTimeoutSyscall);
-PF(SYS_epoll_wait, PatchTimeoutSyscall);
-PF(SYS_epoll_pwait, PatchTimeoutSyscall);
-PF(SYS_poll, PatchTimeoutSyscall);
-
+// PF(SYS_openat, PatchOpen);
+//
+// // Port virtualization -- ports.cpp
+// PF(SYS_bind, PatchBind);
+// PF(SYS_getsockname, PatchGetsockname);
+// PF(SYS_connect, PatchConnect);
+//
+// // CPU virtualization -- cpu.cpp
+// PF(SYS_getcpu, PatchGetcpu);
+// PF(SYS_sched_getaffinity, PatchSchedGetaffinity);
+// PF(SYS_sched_setaffinity, PatchSchedSetaffinity);
+//
+//
+// // Conditional patches, only when not fast-forwarded
+//
+// // Time virtualization -- time.cpp
+// PF(SYS_gettimeofday, PatchGettimeofday);
+// PF(SYS_time, PatchTime);
+// PF(SYS_clock_gettime, PatchClockGettime);
+// PF(SYS_nanosleep, PatchNanosleep);
+// PF(SYS_clock_nanosleep, PatchNanosleep);
+//
+// // Timeout virtualization -- timeout.cpp
+// PF(SYS_futex, PatchTimeoutSyscall);
+// PF(SYS_epoll_wait, PatchTimeoutSyscall);
+// PF(SYS_epoll_pwait, PatchTimeoutSyscall);
+// PF(SYS_poll, PatchTimeoutSyscall);

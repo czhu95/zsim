@@ -60,6 +60,8 @@
 #include "trace_driver.h"
 #include "virt/virt.h"
 
+using std::string;
+
 //#include <signal.h> //can't include this, conflicts with PIN's
 
 /* Command-line switches (used to pass info from harness that cannot be passed through the config file, most config is file-based) */
@@ -85,9 +87,9 @@ KNOB<string> KnobOutputDir(KNOB_MODE_WRITEONCE, "pintool",
 /* ===================================================================== */
 
 INT32 Usage() {
-    cerr << "zsim simulator pintool" << endl;
-    cerr << KNOB_BASE::StringKnobSummary();
-    cerr << endl;
+    std::cerr << "zsim simulator pintool" << std::endl;
+    std::cerr << KNOB_BASE::StringKnobSummary();
+    std::cerr << std::endl;
     return -1;
 }
 
@@ -116,7 +118,7 @@ static inline void clearCid(uint32_t tid) {
     assert(tid < MAX_THREADS);
     assert(cids[tid] != INVALID_CID);
     cids[tid] = INVALID_CID;
-    cores[tid] = nullptr;
+    cores[tid] = NULL;
 }
 
 static inline void setCid(uint32_t tid, uint32_t cid) {
@@ -635,8 +637,8 @@ static Section FindSection(const char* sec) {
                 char * dash = strchr(buf, '-');
                 if (dash) {
                     *dash='\0';
-                    res.start = strtoul(buf, nullptr, 16);
-                    res.end   = strtoul(dash+1, nullptr, 16);
+                    res.start = strtoul(buf, NULL, 16);
+                    res.end   = strtoul(dash+1, NULL, 16);
                 }
             }
         }
@@ -977,7 +979,7 @@ VOID ContextChange(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT* fr
 
     warn("[%d] ContextChange, reason %s, inSyscall %d", tid, reasonStr, inSyscall[tid]);
     if (inSyscall[tid]) {
-        SyscallExit(tid, to, SYSCALL_STANDARD_IA32E_LINUX, nullptr);
+        SyscallExit(tid, to, SYSCALL_STANDARD_IA32E_LINUX, NULL);
     }
 
     if (reason == CONTEXT_CHANGE_REASON_FATALSIGNAL) {
@@ -987,7 +989,7 @@ VOID ContextChange(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT* fr
     }
 
     //If this is an issue, we might need to call syscallexit on occasion. I very much doubt it
-    //SyscallExit(tid, to, SYSCALL_STANDARD_IA32E_LINUX, nullptr); //NOTE: For now it is safe to do spurious syscall exits, but careful...
+    //SyscallExit(tid, to, SYSCALL_STANDARD_IA32E_LINUX, NULL); //NOTE: For now it is safe to do spurious syscall exits, but careful...
 }
 
 /* Fork and exec instrumentation */
@@ -1031,7 +1033,7 @@ BOOL FollowChild(CHILD_PROCESS childProcess, VOID * userData) {
     return true; //always follow
 }
 
-static ProcessTreeNode* forkedChildNode = nullptr;
+static ProcessTreeNode* forkedChildNode = NULL;
 
 VOID BeforeFork(THREADID tid, const CONTEXT* ctxt, VOID * arg) {
     forkedChildNode = procTreeNode->getNextChild();
@@ -1039,7 +1041,7 @@ VOID BeforeFork(THREADID tid, const CONTEXT* ctxt, VOID * arg) {
 }
 
 VOID AfterForkInParent(THREADID tid, const CONTEXT* ctxt, VOID * arg) {
-    forkedChildNode = nullptr;
+    forkedChildNode = NULL;
 }
 
 VOID AfterForkInChild(THREADID tid, const CONTEXT* ctxt, VOID * arg) {
@@ -1054,7 +1056,7 @@ VOID AfterForkInChild(THREADID tid, const CONTEXT* ctxt, VOID * arg) {
     snprintf(header, sizeof(header), "[S %dF] ", procIdx); //append an F to distinguish forked from fork/exec'd
     std::stringstream logfile_ss;
     logfile_ss << zinfo->outputDir << "/zsim.log." << procIdx;
-    InitLog(header, KnobLogToFile.Value()? logfile_ss.str().c_str() : nullptr);
+    InitLog(header, KnobLogToFile.Value()? logfile_ss.str().c_str() : NULL);
 
     info("Forked child (tid %d/%d), PID %d, parent PID %d", tid, PIN_ThreadId(), PIN_GetPid(), getppid());
 
@@ -1064,13 +1066,13 @@ VOID AfterForkInChild(THREADID tid, const CONTEXT* ctxt, VOID * arg) {
         cids[i] = UNINITIALIZED_CID;
         activeThreads[i] = false;
         inSyscall[i] = false;
-        cores[i] = nullptr;
+        cores[i] = NULL;
     }
 
     //We need to launch another copy of the FF control thread
-    PIN_SpawnInternalThread(FFThread, nullptr, 64*1024, nullptr);
+    PIN_SpawnInternalThread(FFThread, NULL, 64*1024, NULL);
 
-    ThreadStart(tid, nullptr, 0, nullptr);
+    ThreadStart(tid, NULL, 0, NULL);
 }
 
 /** Finalization **/
@@ -1087,7 +1089,7 @@ VOID SimEnd() {
             struct timespec tm;
             tm.tv_sec = 1;
             tm.tv_nsec = 0;
-            nanosleep(&tm, nullptr);
+            nanosleep(&tm, NULL);
         }
     }
 
@@ -1339,10 +1341,10 @@ VOID FFThread(VOID* arg) {
 
         futex_lock(&zinfo->ffLock);
         if (procTreeNode->isInFastForward()) {
-            GetVmLock(); //like a callback. This disallows races on all syscall instrumentation, etc.
+            // GetVmLock(); //like a callback. This disallows races on all syscall instrumentation, etc.
             info("Exiting fast forward");
             ExitFastForward();
-            ReleaseVmLock();
+            // ReleaseVmLock();
         } else {
             SyncEvent* syncEv = new SyncEvent();
             zinfo->eventQueue->insert(syncEv); //will run on next phase
@@ -1432,14 +1434,14 @@ int main(int argc, char *argv[]) {
     if (PIN_Init(argc, argv)) return Usage();
 
     //Register an internal exception handler (ASAP, to catch segfaults in init)
-    PIN_AddInternalExceptionHandler(InternalExceptionHandler, nullptr);
+    PIN_AddInternalExceptionHandler(InternalExceptionHandler, NULL);
 
     procIdx = KnobProcIdx.Value();
     char header[64];
     snprintf(header, sizeof(header), "[S %d] ", procIdx);
     std::stringstream logfile_ss;
     logfile_ss << KnobOutputDir.Value() << "/zsim.log." << procIdx;
-    InitLog(header, KnobLogToFile.Value()? logfile_ss.str().c_str() : nullptr);
+    InitLog(header, KnobLogToFile.Value()? logfile_ss.str().c_str() : NULL);
 
     //If parent dies, kill us
     //This avoids leaving strays running in any circumstances, but may be too heavy-handed with arbitrary process hierarchies.
@@ -1549,7 +1551,7 @@ int main(int argc, char *argv[]) {
 
     //FFwd control
     //OK, screw it. Launch this on a separate thread, and forget about signals... the caller will set a shared memory var. PIN is hopeless with signal instrumentation on multithreaded processes!
-    PIN_SpawnInternalThread(FFThread, nullptr, 64*1024, nullptr);
+    PIN_SpawnInternalThread(FFThread, NULL, 64*1024, NULL);
 
     // Start trace-driven or exec-driven sim
     if (zinfo->traceDriven) {

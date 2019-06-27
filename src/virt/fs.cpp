@@ -120,7 +120,7 @@ vector<string> listdir(string dir) {
     if (!d) panic("Invalid dir %s", dir.c_str());
 
     struct dirent* de;
-    while ((de = readdir(d)) != nullptr) {
+    while ((de = readdir(d)) != NULL) {
         string s = de->d_name;
         if (s == ".") continue;
         if (s == "..") continue;
@@ -152,9 +152,25 @@ vector<string>* getFakedPaths(const char* patchRoot) {
     return res;
 }
 
-static const vector<string>* fakedPaths = nullptr; //{"/proc/cputinfo", "/proc/stat", "/sys", "/lib", "/usr"};
+static const vector<string>* fakedPaths = NULL; //{"/proc/cputinfo", "/proc/stat", "/sys", "/lib", "/usr"};
 static uint32_t numInfos = 0;
 static const uint32_t MAX_INFOS = 100;
+
+struct PatchOpenFunctor : public PostPatchFunctor {
+    PatchOpenFunctor(int pathReg, ADDRINT pathArg, char *patchPathMem)
+        : pathReg(pathReg), pathArg(pathArg), patchPathMem(patchPathMem) {}
+
+    PostPatchAction operator ()(PostPatchArgs args) override {
+        PIN_SetSyscallArgument(args.ctxt, args.std, pathReg, pathArg);
+        free(patchPathMem);
+        return PPA_NOTHING;
+    }
+
+    int pathReg;
+    ADDRINT pathArg;
+    char *patchPathMem;
+};
+
 
 // SYS_open and SYS_openat; these are ALWAYS patched
 PostPatchFn PatchOpen(PrePatchArgs args) {
@@ -180,7 +196,7 @@ PostPatchFn PatchOpen(PrePatchArgs args) {
         if (res > 0) {
             buf[res] = '\0';  // argh... readlink does not null-terminate strings!
             // Double-check deref'd symlink is valid
-            char* rp = realpath(buf, nullptr);
+            char* rp = realpath(buf, NULL);
             if (rp) {
                 fileName = string(buf) + "/" + fileName;
                 free(rp);
@@ -228,11 +244,12 @@ PostPatchFn PatchOpen(PrePatchArgs args) {
                 PIN_SetSyscallArgument(ctxt, std, pathReg, (ADDRINT) patchPathMem);
 
                 // Restore old path on syscall exit
-                return [pathReg, pathArg, patchPathMem](PostPatchArgs args) {
-                    PIN_SetSyscallArgument(args.ctxt, args.std, pathReg, pathArg);
-                    free(patchPathMem);
-                    return PPA_NOTHING;
-                };
+                return new PatchOpenFunctor(pathReg, pathArg, patchPathMem);
+                // return [pathReg, pathArg, patchPathMem](PostPatchArgs args) {
+                //     PIN_SetSyscallArgument(args.ctxt, args.std, pathReg, pathArg);
+                //     free(patchPathMem);
+                //     return PPA_NOTHING;
+                // };
             } else {
                 info("Patched SYS_open to match %s, left unpatched (no patch)", fileName.c_str());
                 return NullPostPatch;

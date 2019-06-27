@@ -28,7 +28,6 @@
 #include <queue>
 #include <sstream>
 #include <string>
-#include <typeinfo>
 #include <unordered_map>
 #include <vector>
 #include "log.h"
@@ -94,7 +93,7 @@ ContentionSim::ContentionSim(uint32_t _numDomains, uint32_t _numSimThreads) {
     threadTicket = 0;
     __sync_synchronize();
     for (uint32_t i = 0; i < numSimThreads; i++) {
-        PIN_SpawnInternalThread(SimThreadTrampoline, this, 1024*1024, nullptr);
+        PIN_SpawnInternalThread(SimThreadTrampoline, this, 1024*1024, NULL);
     }
 
     lastCrossing = gm_calloc<CrossingEventInfo>(numDomains*numDomains*MAX_THREADS); //TODO: refine... this allocs too much
@@ -102,13 +101,11 @@ ContentionSim::ContentionSim(uint32_t _numDomains, uint32_t _numSimThreads) {
 
 void ContentionSim::postInit() {
     for (uint32_t i = 0; i < zinfo->numCores; i++) {
-        TimingCore* tcore = dynamic_cast<TimingCore*>(zinfo->cores[i]);
-        if (tcore) {
+        if (zinfo->cores[i]->type() == Core::CoreType::Timing) {
             skipContention = false;
             return;
         }
-        OOOCore* ocore = dynamic_cast<OOOCore*>(zinfo->cores[i]);
-        if (ocore) {
+        if (zinfo->cores[i]->type() == Core::CoreType::OOO) {
             skipContention = false;
             return;
         }
@@ -151,10 +148,11 @@ void ContentionSim::simulatePhase(uint64_t limit) {
 
     //info("simulatePhase limit %ld", limit);
     for (uint32_t i = 0; i < zinfo->numCores; i++) {
-        TimingCore* tcore = dynamic_cast<TimingCore*>(zinfo->cores[i]);
-        if (tcore) tcore->cSimStart();
-        OOOCore* ocore = dynamic_cast<OOOCore*>(zinfo->cores[i]);
-        if (ocore) ocore->cSimStart();
+        zinfo->cores[i]->cSimStart();
+        // TimingCore* tcore = dynamic_cast<TimingCore*>(zinfo->cores[i]);
+        // if (tcore) tcore->cSimStart();
+        // OOOCore* ocore = dynamic_cast<OOOCore*>(zinfo->cores[i]);
+        // if (ocore) ocore->cSimStart();
     }
 
     inCSim = true;
@@ -172,10 +170,11 @@ void ContentionSim::simulatePhase(uint64_t limit) {
     __sync_synchronize();
 
     for (uint32_t i = 0; i < zinfo->numCores; i++) {
-        TimingCore* tcore = dynamic_cast<TimingCore*>(zinfo->cores[i]);
-        if (tcore) tcore->cSimEnd();
-        OOOCore* ocore = dynamic_cast<OOOCore*>(zinfo->cores[i]);
-        if (ocore) ocore->cSimEnd();
+        zinfo->cores[i]->cSimEnd();
+        // TimingCore* tcore = dynamic_cast<TimingCore*>(zinfo->cores[i]);
+        // if (tcore) tcore->cSimEnd();
+        // OOOCore* ocore = dynamic_cast<OOOCore*>(zinfo->cores[i]);
+        // if (ocore) ocore->cSimEnd();
     }
 
     lastLimit = limit;
@@ -220,7 +219,7 @@ void ContentionSim::enqueueCrossing(CrossingEvent* ev, uint64_t cycle, uint32_t 
     CrossingStack& cs = evRec->getCrossingStack();
     bool isFirst = cs.empty();
     bool isResp = false;
-    CrossingEvent* req = nullptr;
+    CrossingEvent* req = NULL;
     if (!isFirst) {
         CrossingEvent* b = cs.back();
         if (b->srcDomain == (uint32_t)ev->domain && (uint32_t)b->domain == ev->srcDomain) {
@@ -328,11 +327,11 @@ void ContentionSim::simulatePhaseThread(uint32_t thid) {
                 std::string desc = evsSeen[te];
                 if (desc == "") { //non-existnt
                     std::stringstream ss;
-                    ss << uniqueEvs << " " << typeid(*te).name();
-                    CrossingEvent* ce = dynamic_cast<CrossingEvent*>(te);
-                    if (ce) {
-                        ss << " slack " << (ce->preSlack + ce->postSlack) << " osc " << ce->origStartCycle << " cnt " << ce->simCount;
-                    }
+                    ss << uniqueEvs << " " << ce->repr();
+                    // CrossingEvent* ce = dynamic_cast<CrossingEvent*>(te);
+                    // if (ce) {
+                    //     ss << " slack " << (ce->preSlack + ce->postSlack) << " osc " << ce->origStartCycle << " cnt " << ce->simCount;
+                    // }
 
                     evsSeen[te] = ss.str();
                     uniqueEvs++;

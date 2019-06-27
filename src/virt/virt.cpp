@@ -36,7 +36,13 @@
 PrePatchFn prePatchFunctions[MAX_SYSCALLS];
 PostPatchFn postPatchFunctions[MAX_THREADS];
 
-const PostPatchFn NullPostPatch = [](PostPatchArgs) {return PPA_NOTHING;};
+static struct : public PostPatchFunctor {
+    PostPatchAction operator ()(PostPatchArgs args) override {
+        return PPA_NOTHING;
+    }
+} NullPostPatchFunc;
+
+const PostPatchFn NullPostPatch = &NullPostPatchFunc;
 
 // Common prepatch functions
 PostPatchFn NullPatch(PrePatchArgs) {
@@ -58,11 +64,17 @@ void VirtInit() {
     for (uint32_t i = 0; i < MAX_SYSCALLS; i++) prePatchFunctions[i] = NullPatch;
 
     // Issue warnings on timing-sensitive syscalls
-    for (uint32_t syscall : {SYS_select, SYS_getitimer, SYS_alarm, SYS_setitimer, SYS_semop,
+    uint32_t syscalls[] = {SYS_select, SYS_getitimer, SYS_alarm, SYS_setitimer, SYS_semop,
             SYS_gettimeofday, SYS_times, SYS_rt_sigtimedwait, SYS_time, SYS_futex, SYS_mq_timedsend,
-            SYS_mq_timedreceive, SYS_pselect6, SYS_ppoll}) {
-        prePatchFunctions[syscall] = WarnTimingRelated;
-    }
+            SYS_mq_timedreceive, SYS_pselect6, SYS_ppoll};
+
+    for (int i = 0; i < 14; i ++)
+        prePatchFunctions[syscalls[i]] = WarnTimingRelated;
+    // for (uint32_t syscall : {SYS_select, SYS_getitimer, SYS_alarm, SYS_setitimer, SYS_semop,
+    //         SYS_gettimeofday, SYS_times, SYS_rt_sigtimedwait, SYS_time, SYS_futex, SYS_mq_timedsend,
+    //         SYS_mq_timedreceive, SYS_pselect6, SYS_ppoll}) {
+    //     prePatchFunctions[syscall] = WarnTimingRelated;
+    // }
 
     // Bind all patch functions
     #define PF(syscall, pfn) prePatchFunctions[syscall] = pfn;
@@ -83,6 +95,6 @@ void VirtSyscallEnter(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, const c
 }
 
 PostPatchAction VirtSyscallExit(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std) {
-    return postPatchFunctions[tid]({tid, ctxt, std});
+    return (*postPatchFunctions[tid])({tid, ctxt, std});
 }
 

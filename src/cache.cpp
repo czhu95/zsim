@@ -94,7 +94,7 @@ uint64_t Cache::access(MemReq& req) {
         if (unlikely(wbAcc.isValid())) {
             if (!evRec->hasRecord()) {
                 // Downstream should not care about endEvent for PUTs
-                wbAcc.endEvent = nullptr;
+                wbAcc.endEvent = NULL;
                 evRec->pushRecord(wbAcc);
             } else {
                 // Connect both events
@@ -130,7 +130,7 @@ void Cache::startInvalidate() {
 }
 
 uint64_t Cache::finishInvalidate(const InvReq& req) {
-    int32_t lineId = array->lookup(req.lineAddr, nullptr, false);
+    int32_t lineId = array->lookup(req.lineAddr, NULL, false);
     assert_msg(lineId != -1, "[%s] Invalidate on non-existing address 0x%lx type %s lineId %d, reqWriteback %d", name.c_str(), req.lineAddr, InvTypeName(req.type), lineId, *req.writeback);
     uint64_t respCycle = req.cycle + invLat;
     trace(Cache, "[%s] Invalidate start 0x%lx type %s lineId %d, reqWriteback %d", name.c_str(), req.lineAddr, InvTypeName(req.type), lineId, *req.writeback);

@@ -29,9 +29,9 @@
 
 UMonMonitor::UMonMonitor(uint32_t _numLines, uint32_t _umonLines, uint32_t _umonBuckets, uint32_t _numPartitions, uint32_t _buckets)
         : PartitionMonitor(_buckets)
-        , missCache(nullptr)
+        , missCache(NULL)
         , missCacheValid(false)
-        , monitors(_numPartitions, nullptr) {
+        , monitors(_numPartitions, NULL) {
     assert(_numPartitions > 0);
 
     missCache = gm_calloc<uint32_t>(_buckets * _numPartitions);

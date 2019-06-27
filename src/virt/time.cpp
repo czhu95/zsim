@@ -131,21 +131,17 @@ void VirtClockGettime(uint32_t tid, ADDRINT arg0, ADDRINT arg1) {
     }
 }
 
-// Syscall patch wrappers
-
-PostPatchFn PatchGettimeofday(PrePatchArgs args) {
-    if (SkipTimeVirt(args)) return NullPostPatch;
-    return [](PostPatchArgs args) {
+struct PatchGettimeofdayFunc : public PostPatchFunctor {
+    PostPatchAction operator ()(PostPatchArgs args) override {
         trace(TimeVirt, "[%d] Post-patching SYS_gettimeofday", args.tid);
         ADDRINT arg0 = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
         VirtGettimeofday(args.tid, arg0);
         return PPA_NOTHING;
     };
-}
+};
 
-PostPatchFn PatchTime(PrePatchArgs args) {
-    if (SkipTimeVirt(args)) return NullPostPatch;
-    return [](PostPatchArgs args) {
+struct PatchTimeFunc : public PostPatchFunctor {
+    PostPatchAction operator ()(PostPatchArgs args) override {
         trace(TimeVirt, "[%d] Post-patching SYS_time", args.tid);
         ADDRINT arg0 = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
         REG out = (REG)PIN_GetSyscallNumber(args.ctxt, args.std);
@@ -153,17 +149,115 @@ PostPatchFn PatchTime(PrePatchArgs args) {
         PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT) out);  // hack, we have no way of setting the result, this changes rax just as well
         return PPA_NOTHING;
     };
-}
+};
 
-PostPatchFn PatchClockGettime(PrePatchArgs args) {
-    if (SkipTimeVirt(args)) return NullPostPatch;
-    return [](PostPatchArgs args) {
+struct PatchClockGettimeFunc : public PostPatchFunctor {
+    PostPatchAction operator ()(PostPatchArgs args) override {
         trace(TimeVirt, "[%d] Post-patching SYS_clock_gettime", args.tid);
         ADDRINT arg0 = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
         ADDRINT arg1 = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
         VirtClockGettime(args.tid, arg0, arg1);
         return PPA_NOTHING;
     };
+};
+
+struct PatchNanosleepFunc : public PostPatchFunctor {
+
+    PatchNanosleepFunc(bool isClock, uint64_t wakeupPhase, ADDRINT arg0,
+                       ADDRINT arg1, ADDRINT arg2, ADDRINT arg3,
+                       struct timespec *rem)
+        : isClock(isClock), wakeupPhase(wakeupPhase), arg0(arg0), arg1(arg1),
+          arg2(arg2), arg3(arg3), rem(rem) {}
+
+    PostPatchAction operator ()(PostPatchArgs args) override {
+        CONTEXT* ctxt = args.ctxt;
+        SYSCALL_STANDARD std = args.std;
+
+        if (isClock) {
+            trace(TimeVirt, "[%d] Post-patching SYS_clock_nanosleep", args.tid);
+        } else {
+            trace(TimeVirt, "[%d] Post-patching SYS_nanosleep", args.tid);
+        }
+
+        int res = (int)(-PIN_GetSyscallNumber(ctxt, std));
+        if (res == EWOULDBLOCK) {
+            trace(TimeVirt, "Fixing EWOULDBLOCK --> 0");
+            PIN_SetSyscallNumber(ctxt, std, 0);  // this is fine, you just called a very very short sleep
+        } else if (res == EINTR) {
+            PIN_SetSyscallNumber(ctxt, std, -EINTR);  // we got an interrupt
+        } else {
+            trace(TimeVirt, "%d", res);
+            assert(res == 0);
+        }
+
+        // Restore pre-call args
+        PIN_SetSyscallArgument(ctxt, std, 0, arg0);
+        PIN_SetSyscallArgument(ctxt, std, 1, arg1);
+        PIN_SetSyscallArgument(ctxt, std, 2, arg2);
+        PIN_SetSyscallArgument(ctxt, std, 3, arg3);
+
+        // Handle remaining time stuff
+        if (rem) {
+            if (res == EINTR) {
+                assert(wakeupPhase >= zinfo->numPhases);  // o/w why is this EINTR...
+                uint64_t remainingCycles = wakeupPhase - zinfo->numPhases;
+                uint64_t remainingNsecs = remainingCycles*1000/zinfo->freqMHz;
+                rem->tv_sec = remainingNsecs/1000000000;
+                rem->tv_nsec = remainingNsecs % 1000000000;
+            } else {
+                rem->tv_sec = 0;
+                rem->tv_nsec = 0;
+            }
+        }
+
+        return PPA_NOTHING;
+    }
+
+    bool isClock;
+    uint64_t wakeupPhase;
+    ADDRINT arg0, arg1, arg2, arg3;
+    struct timespec* rem;
+};
+
+// Syscall patch wrappers
+
+PostPatchFn PatchGettimeofday(PrePatchArgs args) {
+    if (SkipTimeVirt(args)) return NullPostPatch;
+
+    return new PatchGettimeofdayFunc();
+    // return [](PostPatchArgs args) {
+    //     trace(TimeVirt, "[%d] Post-patching SYS_gettimeofday", args.tid);
+    //     ADDRINT arg0 = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
+    //     VirtGettimeofday(args.tid, arg0);
+    //     return PPA_NOTHING;
+    // };
+}
+
+PostPatchFn PatchTime(PrePatchArgs args) {
+    if (SkipTimeVirt(args)) return NullPostPatch;
+
+    return new PatchTimeFunc();
+    // return [](PostPatchArgs args) {
+    //     trace(TimeVirt, "[%d] Post-patching SYS_time", args.tid);
+    //     ADDRINT arg0 = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
+    //     REG out = (REG)PIN_GetSyscallNumber(args.ctxt, args.std);
+    //     VirtTime(args.tid, &out, arg0);
+    //     PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT) out);  // hack, we have no way of setting the result, this changes rax just as well
+    //     return PPA_NOTHING;
+    // };
+}
+
+PostPatchFn PatchClockGettime(PrePatchArgs args) {
+    if (SkipTimeVirt(args)) return NullPostPatch;
+
+    return new PatchClockGettimeFunc();
+    // return [](PostPatchArgs args) {
+    //     trace(TimeVirt, "[%d] Post-patching SYS_clock_gettime", args.tid);
+    //     ADDRINT arg0 = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
+    //     ADDRINT arg1 = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
+    //     VirtClockGettime(args.tid, arg0, arg1);
+    //     return PPA_NOTHING;
+    // };
 }
 
 // SYS_nanosleep & SYS_clock_nanosleep
@@ -221,51 +315,52 @@ PostPatchFn PatchNanosleep(PrePatchArgs args) {
     PIN_SetSyscallArgument(ctxt, std, 0, (ADDRINT)futexWord);
     PIN_SetSyscallArgument(ctxt, std, 1, (ADDRINT)FUTEX_WAIT);
     PIN_SetSyscallArgument(ctxt, std, 2, (ADDRINT)1 /*by convention, see sched code*/);
-    PIN_SetSyscallArgument(ctxt, std, 3, (ADDRINT)nullptr);
+    PIN_SetSyscallArgument(ctxt, std, 3, (ADDRINT)NULL);
 
-    return [isClock, wakeupPhase, arg0, arg1, arg2, arg3, rem](PostPatchArgs args) {
-        CONTEXT* ctxt = args.ctxt;
-        SYSCALL_STANDARD std = args.std;
+    return new PatchNanosleepFunc(isClock, wakeupPhase, arg0, arg1, arg2, arg3, rem);
+    // return [isClock, wakeupPhase, arg0, arg1, arg2, arg3, rem](PostPatchArgs args) {
+    //     CONTEXT* ctxt = args.ctxt;
+    //     SYSCALL_STANDARD std = args.std;
 
-        if (isClock) {
-            trace(TimeVirt, "[%d] Post-patching SYS_clock_nanosleep", args.tid);
-        } else {
-            trace(TimeVirt, "[%d] Post-patching SYS_nanosleep", args.tid);
-        }
+    //     if (isClock) {
+    //         trace(TimeVirt, "[%d] Post-patching SYS_clock_nanosleep", args.tid);
+    //     } else {
+    //         trace(TimeVirt, "[%d] Post-patching SYS_nanosleep", args.tid);
+    //     }
 
-        int res = (int)(-PIN_GetSyscallNumber(ctxt, std));
-        if (res == EWOULDBLOCK) {
-            trace(TimeVirt, "Fixing EWOULDBLOCK --> 0");
-            PIN_SetSyscallNumber(ctxt, std, 0);  // this is fine, you just called a very very short sleep
-        } else if (res == EINTR) {
-            PIN_SetSyscallNumber(ctxt, std, -EINTR);  // we got an interrupt
-        } else {
-            trace(TimeVirt, "%d", res);
-            assert(res == 0);
-        }
+    //     int res = (int)(-PIN_GetSyscallNumber(ctxt, std));
+    //     if (res == EWOULDBLOCK) {
+    //         trace(TimeVirt, "Fixing EWOULDBLOCK --> 0");
+    //         PIN_SetSyscallNumber(ctxt, std, 0);  // this is fine, you just called a very very short sleep
+    //     } else if (res == EINTR) {
+    //         PIN_SetSyscallNumber(ctxt, std, -EINTR);  // we got an interrupt
+    //     } else {
+    //         trace(TimeVirt, "%d", res);
+    //         assert(res == 0);
+    //     }
 
-        // Restore pre-call args
-        PIN_SetSyscallArgument(ctxt, std, 0, arg0);
-        PIN_SetSyscallArgument(ctxt, std, 1, arg1);
-        PIN_SetSyscallArgument(ctxt, std, 2, arg2);
-        PIN_SetSyscallArgument(ctxt, std, 3, arg3);
+    //     // Restore pre-call args
+    //     PIN_SetSyscallArgument(ctxt, std, 0, arg0);
+    //     PIN_SetSyscallArgument(ctxt, std, 1, arg1);
+    //     PIN_SetSyscallArgument(ctxt, std, 2, arg2);
+    //     PIN_SetSyscallArgument(ctxt, std, 3, arg3);
 
-        // Handle remaining time stuff
-        if (rem) {
-            if (res == EINTR) {
-                assert(wakeupPhase >= zinfo->numPhases);  // o/w why is this EINTR...
-                uint64_t remainingCycles = wakeupPhase - zinfo->numPhases;
-                uint64_t remainingNsecs = remainingCycles*1000/zinfo->freqMHz;
-                rem->tv_sec = remainingNsecs/1000000000;
-                rem->tv_nsec = remainingNsecs % 1000000000;
-            } else {
-                rem->tv_sec = 0;
-                rem->tv_nsec = 0;
-            }
-        }
+    //     // Handle remaining time stuff
+    //     if (rem) {
+    //         if (res == EINTR) {
+    //             assert(wakeupPhase >= zinfo->numPhases);  // o/w why is this EINTR...
+    //             uint64_t remainingCycles = wakeupPhase - zinfo->numPhases;
+    //             uint64_t remainingNsecs = remainingCycles*1000/zinfo->freqMHz;
+    //             rem->tv_sec = remainingNsecs/1000000000;
+    //             rem->tv_nsec = remainingNsecs % 1000000000;
+    //         } else {
+    //             rem->tv_sec = 0;
+    //             rem->tv_nsec = 0;
+    //         }
+    //     }
 
-        return PPA_NOTHING;
-    };
+    //     return PPA_NOTHING;
+    // };
 }
 
 // Clock domain query functions

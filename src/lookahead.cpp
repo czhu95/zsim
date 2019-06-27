@@ -24,18 +24,18 @@
  */
 
 #include <algorithm>
-#include <tuple>
+#include <utility>
+// #include <tuple>
 #include "part_repl_policies.h"
 #include "partitioner.h"
 
-using std::tuple;
-using std::tie;
-using std::make_tuple;
+using std::pair;
+using std::make_pair;
 
 // generic lookahead algorithm
 namespace lookahead {
 
-static tuple<double, uint32_t> getMaxMarginalUtility(
+static pair<double, uint32_t> getMaxMarginalUtility(
     uint32_t numPartitions, uint32_t part, uint32_t partAlloc,
     uint32_t balance, const PartitionMonitor& monitor) {
     double maxMu = -1.0;
@@ -50,7 +50,7 @@ static tuple<double, uint32_t> getMaxMarginalUtility(
             maxMuAlloc = i;
         }
     }
-    return make_tuple(maxMu, maxMuAlloc);
+    return make_pair(maxMu, maxMuAlloc);
 }
 
 //Utility is defined as misses saved over not having a cache
@@ -89,9 +89,9 @@ void computeBestPartitioning(
                 continue;
             }
 
-            uint32_t muAlloc;
-            double mu;
-            tie(mu, muAlloc) = getMaxMarginalUtility(numPartitions, i, allocs[i], balance, monitor);
+            auto ret = getMaxMarginalUtility(numPartitions, i, allocs[i], balance, monitor);
+            double mu = ret.first;
+            uint32_t muAlloc = ret.second;
             if (mu > maxMu) {
                 maxMu = mu;
                 maxMuPart = i;

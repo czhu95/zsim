@@ -84,7 +84,7 @@ struct Slab {  // POD type (no constructor)
             liveElems++;  // allocation is unsynced, no need for atomic op
             return ptr;
         } else {
-            return nullptr;
+            return NULL;
         }
     }
 
@@ -99,7 +99,7 @@ class SlabAlloc {
         mutex freeLock;  // used because slab frees may be concurrent
 
     public:
-        SlabAlloc() : curSlab(nullptr), liveSlabs(0) {
+        SlabAlloc() : curSlab(NULL), liveSlabs(0) {
             allocSlab();
         }
 

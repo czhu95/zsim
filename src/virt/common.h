@@ -29,7 +29,6 @@
 // Typedefs and common functions for Virt implementation
 // This is internal to virt, and should only be included withing virt/ files
 
-#include <functional>
 #include "log.h"
 #include "pin.H"
 #include "virt/virt.h"
@@ -48,7 +47,12 @@ struct PostPatchArgs {
     SYSCALL_STANDARD std;
 };
 
-typedef std::function<PostPatchAction(PostPatchArgs)> PostPatchFn;
+struct PostPatchFunctor {
+    virtual PostPatchAction operator ()(PostPatchArgs args) = 0;
+};
+
+// typedef std::function<PostPatchAction(PostPatchArgs)> PostPatchFn;
+typedef PostPatchFunctor * PostPatchFn;
 typedef PostPatchFn (*PrePatchFn)(PrePatchArgs);
 
 extern const PostPatchFn NullPostPatch; // defined in virt.cpp

@@ -216,6 +216,41 @@ void PostPatchFutex(uint32_t tid, FutexInfo fi, CONTEXT* ctxt, SYSCALL_STANDARD 
     }
 }
 
+struct PatchTimeoutOnSuccess : public PostPatchFunctor {
+    PatchTimeoutOnSuccess(int syscall, ADDRINT prevIp,
+                          ADDRINT timeoutArgVal, FutexInfo fi)
+        : syscall(syscall), prevIp(prevIp),
+          timeoutArgVal(timeoutArgVal), fi(fi) {}
+
+    PostPatchAction operator ()(PostPatchArgs args) override {
+        if (PostPatchTimeoutSyscall(args.tid, args.ctxt, args.std, syscall, prevIp, timeoutArgVal)) {
+            return PPA_USE_RETRY_PTRS;  // retry
+        } else {
+            if (syscall == SYS_futex) PostPatchFutex(args.tid, fi, args.ctxt, args.std);
+            return PPA_USE_JOIN_PTRS;  // finish
+        }
+    }
+
+    int syscall;
+    ADDRINT prevIp, timeoutArgVal;
+    FutexInfo fi;
+
+};
+
+struct PatchTimeoutOnFail : public PostPatchFunctor {
+    PatchTimeoutOnFail(FutexInfo fi)
+        : fi(fi) {}
+
+    PostPatchAction operator ()(PostPatchArgs args) override {
+        PostPatchFutex(args.tid, fi, args.ctxt, args.std);
+        return PPA_NOTHING;
+    }
+
+    FutexInfo fi;
+
+};
+
+
 PostPatchFn PatchTimeoutSyscall(PrePatchArgs args) {
     if (SkipTimeoutVirt(args)) return NullPostPatch;
 
@@ -229,20 +264,22 @@ PostPatchFn PatchTimeoutSyscall(PrePatchArgs args) {
     if (PrePatchTimeoutSyscall(args.tid, args.ctxt, args.std, syscall)) {
         ADDRINT prevIp = PIN_GetContextReg(args.ctxt, REG_INST_PTR);
         ADDRINT timeoutArgVal = PIN_GetSyscallArgument(args.ctxt, args.std, getTimeoutArg(syscall));
-        return [syscall, prevIp, timeoutArgVal, fi](PostPatchArgs args) {
-            if (PostPatchTimeoutSyscall(args.tid, args.ctxt, args.std, syscall, prevIp, timeoutArgVal)) {
-                return PPA_USE_RETRY_PTRS;  // retry
-            } else {
-                if (syscall == SYS_futex) PostPatchFutex(args.tid, fi, args.ctxt, args.std);
-                return PPA_USE_JOIN_PTRS;  // finish
-            }
-        };
+        return new PatchTimeoutOnSuccess(syscall, prevIp, timeoutArgVal, fi);
+        // return [syscall, prevIp, timeoutArgVal, fi](PostPatchArgs args) {
+        //     if (PostPatchTimeoutSyscall(args.tid, args.ctxt, args.std, syscall, prevIp, timeoutArgVal)) {
+        //         return PPA_USE_RETRY_PTRS;  // retry
+        //     } else {
+        //         if (syscall == SYS_futex) PostPatchFutex(args.tid, fi, args.ctxt, args.std);
+        //         return PPA_USE_JOIN_PTRS;  // finish
+        //     }
+        // };
     } else {
         if (syscall == SYS_futex) {
-            return [fi](PostPatchArgs args) {
-                PostPatchFutex(args.tid, fi, args.ctxt, args.std);
-                return PPA_NOTHING;
-            };
+            return new PatchTimeoutOnFail(fi);
+            // return [fi](PostPatchArgs args) {
+            //     PostPatchFutex(args.tid, fi, args.ctxt, args.std);
+            //     return PPA_NOTHING;
+            // };
         } else {
             return NullPostPatch;
         }

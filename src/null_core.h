@@ -50,6 +50,11 @@ class NullCore : public Core {
 
         InstrFuncPtrs GetFuncPtrs();
 
+        CoreType type() const override { return Null; };
+
+        void cSimStart() override {}
+        void cSimEnd() override {}
+
     protected:
         inline void bbl(BblInfo* bblInstrs);
 

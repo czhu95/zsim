@@ -85,7 +85,7 @@ class Stat : public GlobAlloc {
         const char* _desc;
 
     public:
-        Stat() : _name(nullptr), _desc(nullptr) {}
+        Stat() : _name(NULL), _desc(NULL) {}
 
         virtual ~Stat() {}
 
@@ -98,6 +98,10 @@ class Stat : public GlobAlloc {
             assert(_desc);
             return _desc;
         }
+
+        virtual bool isAggregate() const { return false; }
+        virtual bool isScalar() const { return false; }
+        virtual bool isVector() const { return false; }
 
     protected:
         virtual void initStat(const char* name, const char* desc) {
@@ -129,17 +133,19 @@ class AggregateStat : public Stat {
             initStat(name, desc);
         }
 
+        bool isAggregate() const override { return true; }
+
         //Returns true if it is a non-empty type, false otherwise. Empty types are culled by the parent.
         bool makeImmutable() {
             assert(_isMutable);
-            assert(_name != nullptr); //Should have been initialized
+            assert(_name != NULL); //Should have been initialized
             _isMutable = false;
             g_vector<Stat*>::iterator it;
             g_vector<Stat*> newChildren;
             for (it = _children.begin(); it != _children.end(); it++) {
                 Stat* s = *it;
-                AggregateStat* as = dynamic_cast<AggregateStat*>(s);
-                if (as) {
+                if (s->isAggregate()) {
+                    AggregateStat* as = static_cast<AggregateStat*>(s);
                     bool emptyChild = as->makeImmutable();
                     if (!emptyChild) newChildren.push_back(s);
                 } else {
@@ -185,6 +191,8 @@ class ScalarStat : public Stat {
             initStat(name, desc);
         }
 
+        bool isScalar() const override { return true; }
+
         virtual uint64_t get() const = 0;
 };
 
@@ -193,17 +201,19 @@ class VectorStat : public Stat {
         const char** _counterNames;
 
     public:
-        VectorStat() : _counterNames(nullptr) {}
+        VectorStat() : _counterNames(NULL) {}
 
         virtual uint64_t count(uint32_t idx) const = 0;
         virtual uint32_t size() const = 0;
 
+        bool isVector() const override { return true; }
+
         inline bool hasCounterNames() {
-            return (_counterNames != nullptr);
+            return (_counterNames != NULL);
         }
 
         inline const char* counterName(uint32_t idx) const {
-            return (_counterNames == nullptr)? nullptr : _counterNames[idx];
+            return (_counterNames == NULL)? NULL : _counterNames[idx];
         }
 
         virtual void init(const char* name, const char* desc) {
@@ -262,7 +272,7 @@ class VectorCounter : public VectorStat {
             assert(size > 0);
             _counters.resize(size);
             for (uint32_t i = 0; i < size; i++) _counters[i] = 0;
-            _counterNames = nullptr;
+            _counterNames = NULL;
         }
 
         /* With counter names */
@@ -308,7 +318,7 @@ class ProxyStat : public ScalarStat {
         uint64_t* _statPtr;
 
     public:
-        ProxyStat() : ScalarStat(), _statPtr(nullptr) {}
+        ProxyStat() : ScalarStat(), _statPtr(NULL) {}
 
         void init(const char* name, const char* desc, uint64_t* ptr) {
             initStat(name, desc);
@@ -327,7 +337,7 @@ class ProxyFuncStat : public ScalarStat {
         uint64_t (*_func)();
 
     public:
-        ProxyFuncStat() : ScalarStat(), _func(nullptr) {}
+        ProxyFuncStat() : ScalarStat(), _func(NULL) {}
 
         void init(const char* name, const char* desc, uint64_t (*func)()) {
             initStat(name, desc);

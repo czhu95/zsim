@@ -82,6 +82,13 @@ extern void EndOfPhaseActions(); //in zsim.cpp
  * follow the layout of zinfo, top-down.
  */
 
+using std::string;
+using std::vector;
+using std::stringstream;
+using std::unordered_map;
+using std::list;
+using std::pair;
+
 BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, uint32_t bankSize, bool isTerminal, uint32_t domain) {
     string type = config.get<const char*>(prefix + "type", "Simple");
     // Shortcut for TraceDriven type
@@ -122,7 +129,7 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     if ((1u << setBits) != numSets) panic("%s: Number of sets must be a power of two (you specified %d sets)", name.c_str(), numSets);
 
     //Hash function
-    HashFamily* hf = nullptr;
+    HashFamily* hf = NULL;
     string hashType = config.get<const char*>(prefix + "array.hash", (arrayType == "Z")? "H3" : "None"); //zcaches must be hashed by default
     if (numHashes) {
         if (hashType == "None") {
@@ -131,7 +138,9 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
             hf = new IdHashFamily;
         } else if (hashType == "H3") {
             //STL hash function
-            size_t seed = _Fnv_hash_bytes(prefix.c_str(), prefix.size()+1, 0xB4AC5B);
+            // size_t seed = _Fnv_hash_bytes(prefix.c_str(), prefix.size()+1, 0xB4AC5B);
+            /* _Fnv_hash_bytes not supported by PinCRT, use a fixned number for now. */
+            size_t seed = 0xB4AC5B;
             //info("%s -> %lx", prefix.c_str(), seed);
             hf = new H3HashFamily(numHashes, setBits, 0xCAC7EAFFA1 + seed /*make randSeed depend on prefix*/);
         } else if (hashType == "SHA1") {
@@ -143,7 +152,9 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
 
     //Replacement policy
     string replType = config.get<const char*>(prefix + "repl.type", (arrayType == "IdealLRUPart")? "IdealLRUPart" : "LRU");
-    ReplPolicy* rp = nullptr;
+    ReplPolicy* rp = NULL;
+    /* Create a typed pointer to store IdealLRUPartReplpolicy, if any. */
+    IdealLRUPartReplPolicy* irp = NULL;
 
     if (replType == "LRU" || replType == "LRUNoSh") {
         bool sharersAware = (replType == "LRU") && !isTerminal;
@@ -170,7 +181,7 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         //Partition mapper
         // TODO: One partition mapper per cache (not bank).
         string partMapper = config.get<const char*>(prefix + "repl.partMapper", "Core");
-        PartMapper* pm = nullptr;
+        PartMapper* pm = NULL;
         if (partMapper == "Core") {
             pm = new CorePartMapper(zinfo->numCores); //NOTE: If the cache is not fully shared, trhis will be inefficient...
         } else if (partMapper == "InstrData") {
@@ -207,7 +218,8 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
             bool testMode = config.get<bool>(prefix + "repl.testMode", false);
             prp = new WayPartReplPolicy(mon, pm, numLines, ways, testMode);
         } else if (replType == "IdealLRUPart") {
-            prp = new IdealLRUPartReplPolicy(mon, pm, numLines, buckets);
+            irp = new IdealLRUPartReplPolicy(mon, pm, numLines, buckets);
+            prp = irp;
         } else { //Vantage
             uint32_t assoc = (arrayType == "Z")? candidates : ways;
             allocPortion = .85;
@@ -230,7 +242,7 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
 
 
     //Alright, build the array
-    CacheArray* array = nullptr;
+    CacheArray* array = NULL;
     if (arrayType == "SetAssoc") {
         array = new SetAssocArray(numLines, ways, rp, hf);
     } else if (arrayType == "Z") {
@@ -243,7 +255,8 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         array = ila;
     } else if (arrayType == "IdealLRUPart") {
         assert(!hf);
-        IdealLRUPartReplPolicy* irp = dynamic_cast<IdealLRUPartReplPolicy*>(rp);
+        // IdealLRUPartReplPolicy* irp = dynamic_cast<IdealLRUPartReplPolicy*>(rp);
+        /* irp will point to typed repl policy so we don't dynamic_cast. */
         if (!irp) panic("IdealLRUPart array needs IdealLRUPart repl policy!");
         array = new IdealLRUPartArray(numLines, irp);
     } else {
@@ -330,7 +343,7 @@ MemObject* BuildMemoryController(Config& config, uint32_t lineSize, uint32_t fre
     //Latency
     uint32_t latency = (type == "DDR")? -1 : config.get<uint32_t>("sys.mem.latency", 100);
 
-    MemObject* mem = nullptr;
+    MemObject* mem = NULL;
     if (type == "Simple") {
         mem = new SimpleMemory(latency, name);
     } else if (type == "MD1") {
@@ -435,7 +448,7 @@ static void InitSystem(Config& config) {
 
     // If a network file is specified, build a Network
     string networkFile = config.get<const char*>("sys.networkFile", "");
-    Network* network = (networkFile != "")? new Network(networkFile.c_str()) : nullptr;
+    Network* network = (networkFile != "")? new Network(networkFile.c_str()) : NULL;
 
     // Build the caches
     vector<const char*> cacheGroupNames;
@@ -666,7 +679,7 @@ static void InitSystem(Config& config) {
                     if (assignedCaches[icache] >= igroup.size()) {
                         panic("%s: icache group %s (%ld caches) is fully used, can't connect more cores to it", name.c_str(), icache.c_str(), igroup.size());
                     }
-                    FilterCache* ic = dynamic_cast<FilterCache*>(igroup[assignedCaches[icache]][0]);
+                    FilterCache* ic = static_cast<FilterCache*>(igroup[assignedCaches[icache]][0]);
                     assert(ic);
                     ic->setSourceId(coreIdx);
                     ic->setFlags(MemReq::IFETCH | MemReq::NOEXCL);
@@ -675,7 +688,7 @@ static void InitSystem(Config& config) {
                     if (assignedCaches[dcache] >= dgroup.size()) {
                         panic("%s: dcache group %s (%ld caches) is fully used, can't connect more cores to it", name.c_str(), dcache.c_str(), dgroup.size());
                     }
-                    FilterCache* dc = dynamic_cast<FilterCache*>(dgroup[assignedCaches[dcache]][0]);
+                    FilterCache* dc = static_cast<FilterCache*>(dgroup[assignedCaches[dcache]][0]);
                     assert(dc);
                     dc->setSourceId(coreIdx);
                     assignedCaches[dcache]++;
@@ -738,7 +751,7 @@ static void InitSystem(Config& config) {
             if (isTerminal(grp)) {
                 for (vector<BaseCache*> cv : *cMap[grp]) {
                     assert(cv.size() == 1);
-                    TraceDriverProxyCache* proxy = dynamic_cast<TraceDriverProxyCache*>(cv[0]);
+                    TraceDriverProxyCache* proxy = static_cast<TraceDriverProxyCache*>(cv[0]);
                     assert(proxy);
                     proxies.push_back(proxy);
                 }
@@ -797,7 +810,9 @@ static void PostInitStats(bool perProcessDir, Config& config) {
     const char* statsFile = gm_strdup((pathStr + "zsim.out").c_str());
 
     if (zinfo->statsPhaseInterval) {
-        const char* periodicStatsFilter = config.get<const char*>("sim.periodicStatsFilter", "");
+        /* Disable FilterStats for the time being as regex is not supported. */
+        // const char* periodicStatsFilter = config.get<const char*>("sim.periodicStatsFilter", "");
+        const char* periodicStatsFilter = "";
         AggregateStat* prStat = (!strlen(periodicStatsFilter))? zinfo->rootStat : FilterStats(zinfo->rootStat, periodicStatsFilter);
         if (!prStat) panic("No stats match sim.periodicStatsFilter regex (%s)! Set interval to 0 to avoid periodic stats", periodicStatsFilter);
         zinfo->periodicStatsBackend = new HDF5Backend(pStatsFile, prStat, (1 << 20) /* 1MB chunks */, zinfo->skipStatsVectors, zinfo->compactPeriodicStats);
@@ -815,7 +830,7 @@ static void PostInitStats(bool perProcessDir, Config& config) {
         zinfo->eventQueue->insert(new PeriodicStatsDumpEvent(zinfo->statsPhaseInterval));
         zinfo->statsBackends->push_back(zinfo->periodicStatsBackend);
     } else {
-        zinfo->periodicStatsBackend = nullptr;
+        zinfo->periodicStatsBackend = NULL;
     }
 
     zinfo->eventualStatsBackend = new HDF5Backend(evStatsFile, zinfo->rootStat, (1 << 17) /* 128KB chunks */, zinfo->skipStatsVectors, false /* don't sum regular aggregates*/);
@@ -946,7 +961,7 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
         uint32_t schedQuantum = config.get<uint32_t>("sim.schedQuantum", 10000); //phases
         zinfo->sched = new Scheduler(EndOfPhaseActions, parallelism, zinfo->numCores, schedQuantum);
     } else {
-        zinfo->sched = nullptr;
+        zinfo->sched = NULL;
     }
 
     zinfo->blockingSyscalls = config.get<bool>("sim.blockingSyscalls", false);
@@ -974,7 +989,7 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     CreateProcessTree(config);
     zinfo->procArray[0]->notifyStart(); //called here so that we can detect end-before-start races
 
-    zinfo->pinCmd = new PinCmd(&config, nullptr /*don't pass config file to children --- can go either way, it's optional*/, outputDir, shmid);
+    zinfo->pinCmd = new PinCmd(&config, NULL /*don't pass config file to children --- can go either way, it's optional*/, outputDir, shmid);
 
     //Caches, cores, memory controllers
     InitSystem(config);
@@ -985,10 +1000,11 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     zinfo->processStats = new ProcessStats(zinfo->rootStat);
 
     const char* procStatsFilter = config.get<const char*>("sim.procStatsFilter", "");
-    if (strlen(procStatsFilter)) {
+    /* Disable FilterStats for the time being as regex is not supported. */
+    if (strlen(procStatsFilter) && 0) {
         zinfo->procStats = new ProcStats(zinfo->rootStat, FilterStats(zinfo->rootStat, procStatsFilter));
     } else {
-        zinfo->procStats = nullptr;
+        zinfo->procStats = NULL;
     }
 
     //It's a global stat, but I want it to be last...

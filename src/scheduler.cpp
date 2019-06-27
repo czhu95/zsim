@@ -26,7 +26,7 @@
 
 #include "scheduler.h"
 #include <fstream>
-#include <regex>
+// #include <regex>
 #include <sys/stat.h>
 #include "config.h" // for ParseList
 #include "pin.H"
@@ -72,7 +72,7 @@ static void TrueSleep(uint32_t usecs) {
  */
 bool IsSleepingInFutex(uint32_t linuxPid, uint32_t linuxTid, uintptr_t futexAddr) {
     std::string fname = "/proc/" + Str(linuxPid) + "/task/" + Str(linuxTid) + "/syscall";
-    std::ifstream fs(fname);
+    std::ifstream fs(fname.c_str());
     if (!fs.is_open()) {
         warn("Could not open %s", fname.c_str());
         return false;
@@ -84,8 +84,8 @@ bool IsSleepingInFutex(uint32_t linuxPid, uint32_t linuxTid, uintptr_t futexAddr
 
     std::vector<std::string> argList = ParseList<std::string>(ss.str());
     bool match = argList.size() >= 2 &&
-        strtoul(argList[0].c_str(), nullptr, 0) == SYS_futex &&
-        (uintptr_t)strtoul(argList[1].c_str(), nullptr, 0) == futexAddr;
+        strtoul(argList[0].c_str(), NULL, 0) == SYS_futex &&
+        (uintptr_t)strtoul(argList[1].c_str(), NULL, 0) == futexAddr;
     //info("%s | %s | SYS_futex = %d futexAddr = 0x%lx | match = %d ", ss.str().c_str(), Str(argList).c_str(), SYS_futex, futexAddr, match);
     return match;
 }
@@ -136,42 +136,47 @@ void Scheduler::watchdogThreadFunc() {
                 FakeLeaveInfo* fl = fakeLeaves.front();
                 ThreadInfo* th = fl->th;
                 uint32_t pid = getPid(th->gid);
-                uint32_t tid = getTid(th->gid);
-                uint32_t cid = th->cid;
+                // uint32_t tid = getTid(th->gid);
+                // uint32_t cid = th->cid;
 
-                const g_string& sbRegexStr = zinfo->procArray[pid]->getSyscallBlacklistRegex();
-                std::regex sbRegex(sbRegexStr.c_str());
-                if (std::regex_match(GetSyscallName(fl->syscallNumber), sbRegex)) {
-                    // If this is the last leave we catch, it is the culprit for sure -> blacklist it
-                    // Over time, this will blacklist every blocking syscall
-                    // The root reason for being conservative though is that we don't have a sure-fire
-                    // way to distinguish IO waits from truly blocking syscalls (TODO)
-                    if (fakeLeaves.size() == 1) {
-                        info("Blacklisting from future fake leaves: [%d] %s @ 0x%lx | arg0 0x%lx arg1 0x%lx", pid, GetSyscallName(fl->syscallNumber), fl->pc, fl->arg0, fl->arg1);
-                        blockingSyscalls[pid].insert(fl->pc);
-                    }
+                /* Disable fake leave due to abscence of regex. */
 
-                    uint64_t pc = fl->pc;
-                    do {
-                        finishFakeLeave(th);
+                // const g_string& sbRegexStr = zinfo->procArray[pid]->getSyscallBlacklistRegex();
+                // std::regex sbRegex(sbRegexStr.c_str());
+                // if (std::regex_match(GetSyscallName(fl->syscallNumber), sbRegex)) {
+                //     // If this is the last leave we catch, it is the culprit for sure -> blacklist it
+                //     // Over time, this will blacklist every blocking syscall
+                //     // The root reason for being conservative though is that we don't have a sure-fire
+                //     // way to distinguish IO waits from truly blocking syscalls (TODO)
+                //     if (fakeLeaves.size() == 1) {
+                //         info("Blacklisting from future fake leaves: [%d] %s @ 0x%lx | arg0 0x%lx arg1 0x%lx", pid, GetSyscallName(fl->syscallNumber), fl->pc, fl->arg0, fl->arg1);
+                //         blockingSyscalls[pid].insert(fl->pc);
+                //     }
 
-                        futex_unlock(&schedLock);
-                        leave(pid, tid, cid);
-                        futex_lock(&schedLock);
+                //     uint64_t pc = fl->pc;
+                //     do {
+                //         finishFakeLeave(th);
 
-                        // also do real leave for other threads blocked at the same pc ...
-                        fl = fakeLeaves.front();
-                        if (fl == nullptr || getPid(th->gid) != pid || fl->pc != pc)
-                            break;
-                        th = fl->th;
-                        tid = getTid(th->gid);
-                        cid = th->cid;
-                        // ... until a lower bound on queue size, in order to make blacklist work
-                    } while (fakeLeaves.size() > 8);
-                } else {
-                    info("Skipping, [%d] %s @ 0x%lx | arg0 0x%lx arg1 0x%lx does not match blacklist regex (%s)",
-                            pid, GetSyscallName(fl->syscallNumber), fl->pc, fl->arg0, fl->arg1, sbRegexStr.c_str());
-                }
+                //         futex_unlock(&schedLock);
+                //         leave(pid, tid, cid);
+                //         futex_lock(&schedLock);
+
+                //         // also do real leave for other threads blocked at the same pc ...
+                //         fl = fakeLeaves.front();
+                //         if (fl == NULL || getPid(th->gid) != pid || fl->pc != pc)
+                //             break;
+                //         th = fl->th;
+                //         tid = getTid(th->gid);
+                //         cid = th->cid;
+                //         // ... until a lower bound on queue size, in order to make blacklist work
+                //     } while (fakeLeaves.size() > 8);
+                // } else {
+                //     info("Skipping, [%d] %s @ 0x%lx | arg0 0x%lx arg1 0x%lx does not match blacklist regex (%s)",
+                //             pid, GetSyscallName(fl->syscallNumber), fl->pc, fl->arg0, fl->arg1, sbRegexStr.c_str());
+                // }
+
+                info("Skipping, [%d] %s @ 0x%lx | arg0 0x%lx arg1 0x%lx does not match blacklist regex",
+                     pid, GetSyscallName(fl->syscallNumber), fl->pc, fl->arg0, fl->arg1);
                 fakeLeaveStalls = 0;
             }
         } else {
@@ -266,7 +271,7 @@ void Scheduler::threadTrampoline(void* arg) {
 }
 
 void Scheduler::startWatchdogThread() {
-    PIN_SpawnInternalThread(threadTrampoline, this, 64*1024, nullptr);
+    PIN_SpawnInternalThread(threadTrampoline, this, 64*1024, NULL);
 }
 
 
@@ -394,7 +399,7 @@ void Scheduler::finishFakeLeave(ThreadInfo* th) {
     FakeLeaveInfo* si = th->fakeLeave;
     fakeLeaves.remove(si);
     delete si;
-    assert(th->fakeLeave == nullptr);
+    assert(th->fakeLeave == NULL);
 }
 
 void Scheduler::waitUntilQueued(ThreadInfo* th) {

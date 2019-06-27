@@ -61,7 +61,7 @@ class StlGlobAlloc {
 
         // Construct/destroy
         // gcc keeps changing these interfaces. See /usr/include/c++/4.8/ext/new_allocator.h
-#if __cplusplus >= 201103L // >= 4.8
+#if false and __cplusplus >= 201103L // >= 4.8
         template<typename _Up, typename... _Args>
         void construct(_Up* __p, _Args&&... __args) { ::new((void *)__p) _Up(std::forward<_Args>(__args)...); }
 

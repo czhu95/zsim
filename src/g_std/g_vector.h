@@ -35,7 +35,7 @@
 // Until GCC is compliant with this, just inherit:
 template <typename T> class g_vector : public std::vector<T, StlGlobAlloc<T> >, public GlobAlloc {
     public:
-        g_vector() = default;
+        g_vector() : std::vector<T, StlGlobAlloc<T> >() {}
 
         g_vector(const std::vector<T>& v) {
             this->resize(v.size());
@@ -44,7 +44,7 @@ template <typename T> class g_vector : public std::vector<T, StlGlobAlloc<T> >, 
             }
         }
 
-        g_vector(std::initializer_list<T> list) : std::vector<T, StlGlobAlloc<T>>(list) {}
+        // g_vector(std::initializer_list<T> list) : std::vector<T, StlGlobAlloc<T>>(list) {}
         g_vector(size_t n, const T& t = T()) : std::vector<T, StlGlobAlloc<T>>(n, t) {}
 };
 

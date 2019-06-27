@@ -28,7 +28,6 @@
 
 #include <stdint.h>
 #include <string>
-#include <typeinfo>
 #include "bithacks.h"
 #include "event_recorder.h"
 #include "galloc.h"
@@ -39,8 +38,8 @@ struct TimingEventBlock {
     TimingEventBlock* next;
 
     TimingEventBlock() {
-        for (uint32_t i = 0; i < TIMING_BLOCK_EVENTS; i++) events[i] = nullptr;
-        next = nullptr;
+        for (uint32_t i = 0; i < TIMING_BLOCK_EVENTS; i++) events[i] = NULL;
+        next = NULL;
     }
 
     void* operator new (size_t sz, EventRecorder* evRec) {
@@ -87,9 +86,9 @@ class TimingEvent {
         uint32_t postDelay; //we could get by with one delay, but pre/post makes it easier to code
 
     public:
-        TimingEvent(uint32_t _preDelay, uint32_t _postDelay, int32_t _domain = -1) : next(nullptr), state(EV_NONE), cycle(0), minStartCycle(-1L), child(nullptr),
+        TimingEvent(uint32_t _preDelay, uint32_t _postDelay, int32_t _domain = -1) : next(NULL), state(EV_NONE), cycle(0), minStartCycle(-1L), child(NULL),
                     domain(_domain), numChildren(0), numParents(0), preDelay(_preDelay), postDelay(_postDelay) {}
-        explicit TimingEvent(int32_t _domain = -1) : next(nullptr), state(EV_NONE), minStartCycle(-1L), child(nullptr),
+        explicit TimingEvent(int32_t _domain = -1) : next(NULL), state(EV_NONE), minStartCycle(-1L), child(NULL),
                     domain(_domain), numChildren(0), numParents(0), preDelay(0), postDelay(0) {} //no delegating constructors until gcc 4.7...
 
         inline uint32_t getDomain() const {return domain;}
@@ -104,7 +103,9 @@ class TimingEvent {
         inline void setMinStartCycle(uint64_t c) {minStartCycle = c;}
 
         TimingEvent* addChild(TimingEvent* childEv, EventRecorder* evRec) {
-            assert_msg(state == EV_NONE || state == EV_QUEUED, "adding child in invalid state %d %s -> %s", state, typeid(*this).name(), typeid(*childEv).name()); //either not scheduled or not executed yet
+            assert_msg(state == EV_NONE || state == EV_QUEUED,
+                       "adding child in invalid state %d %s -> %s",
+                       state, type().c_str(), childEv->type().c_str()); //either not scheduled or not executed yet
             assert(childEv->state == EV_NONE);
 
             TimingEvent* res = childEv;
@@ -155,10 +156,10 @@ class TimingEvent {
 
         inline void run(uint64_t startCycle) {
             assert(this);
-            assert_msg(state == EV_NONE || state == EV_QUEUED, "state %d expected %d (%s)", state, EV_QUEUED, typeid(*this).name());
+            assert_msg(state == EV_NONE || state == EV_QUEUED, "state %d expected %d (%s)", state, EV_QUEUED, type().c_str());
             state = EV_RUNNING;
             assert_msg(startCycle >= minStartCycle, "startCycle %ld < minStartCycle %ld (%s), preDelay %d postDelay %d numChildren %d str %s",
-                    startCycle, minStartCycle, typeid(*this).name(), preDelay, postDelay, numChildren, str().c_str());
+                    startCycle, minStartCycle, type().c_str(), preDelay, postDelay, numChildren, str().c_str());
             simulate(startCycle);
             // NOTE: This assertion is invalid now, because a call to done() may destroy the event.
             // However, since we check other transitions, this should not be a problem.
@@ -208,6 +209,9 @@ class TimingEvent {
         void operator delete (void* p, EventRecorder& evRec) {
             panic("TimingEvent::delete PLACEMENT delete called");
         }
+
+        virtual std::string type() const { return "TimingEvent"; }
+        virtual std::string repr() const { return type(); }
 
         //Describe yourself, useful for debugging
         virtual std::string str() { std::string res; return res; }
@@ -262,7 +266,7 @@ class TimingEvent {
                     slab::freeElem((void*)teb, sizeof(teb));
                     teb = next;
                 }
-                children = nullptr;
+                children = NULL;
                 numChildren = 0;
             }
             slab::freeElem((void*)this, sizeof(TimingEvent));
@@ -297,6 +301,7 @@ class DelayEvent : public TimingEvent {
                 done(doneCycle);
             }
         }
+        std::string type() const override { return "DelayEvent"; }
 
         virtual void simulate(uint64_t simCycle) {
             panic("DelayEvent::simulate() was called --- DelayEvent wakes its children directly");
@@ -352,6 +357,16 @@ class CrossingEvent : public TimingEvent {
         virtual void parentDone(uint64_t startCycle);
 
         virtual void simulate(uint64_t simCycle);
+
+        std::string type() const override { return "CrossingEvent"; }
+
+        std::string repr() const override {
+            std::ostringstream oss;
+            oss << type() << " slack " << preSlack + postSlack
+                          << " osc " << origStartCycle
+                          << " cnt " << simCount;
+            return oss.str();
+        }
 
     private:
         void markSrcEventDone(uint64_t cycle);
