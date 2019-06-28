@@ -46,16 +46,16 @@ using std::vector;
 typedef long long lc_int64;  // NOLINT(runtime/int)
 
 Config::Config(const char* inFile) {
-    config_init(inCfg);
-    config_init(outCfg);
+    config_init(&inCfg);
+    config_init(&outCfg);
 
-    if (!config_read_file (inCfg, inFile))
+    if (!config_read_file (&inCfg, inFile))
         panic("Input config file %s could not be read", inFile);
 }
 
 Config::~Config() {
-    config_destroy(inCfg);
-    config_destroy(outCfg);
+    config_destroy(&inCfg);
+    config_destroy(&outCfg);
 }
 
 // Helper function: Add "*"-prefixed vars, which are used by our scripts but not zsim, to outCfg
@@ -118,11 +118,11 @@ static uint32_t checkIncluded(config_setting_t *s1, config_setting_t *s2, std::s
 
 //Called when initialization ends. Writes output config, and emits warnings for unused input settings
 void Config::writeAndClose(const char* outFile, bool strictCheck) {
-    uint32_t nonSimVars = copyNonSimVars(config_root_setting(inCfg),
-                                         config_root_setting(outCfg),
+    uint32_t nonSimVars = copyNonSimVars(config_root_setting(&inCfg),
+                                         config_root_setting(&outCfg),
                                          std::string(""));
-    uint32_t unused = checkIncluded(config_root_setting(inCfg),
-                                    config_root_setting(outCfg),
+    uint32_t unused = checkIncluded(config_root_setting(&inCfg),
+                                    config_root_setting(&outCfg),
                                     std::string(""));
 
     if (nonSimVars) info("Copied %d non-sim var%s to output config", nonSimVars, (nonSimVars > 1)? "s" : "");
@@ -134,13 +134,13 @@ void Config::writeAndClose(const char* outFile, bool strictCheck) {
         }
     }
 
-    if (!config_write_file(outCfg, outFile))
+    if (!config_write_file(&outCfg, outFile))
         panic("Output config file %s could not be written", outFile);
 }
 
 
 bool Config::exists(const char* key) {
-    return config_lookup(inCfg, key) != NULL;
+    return config_lookup(&inCfg, key) != NULL;
 }
 
 //Helper functions
@@ -259,28 +259,28 @@ template<typename T> static void writeVar(config_t *cfg, const char* key, T val)
 template<typename T>
 T Config::genericGet(const char* key, T def) {
     T val;
-    config_setting_t *setting = config_lookup(inCfg, key);
+    config_setting_t *setting = config_lookup(&inCfg, key);
     if (setting) {
-        if (!config_lookup_type<T>(inCfg, key, &val))
+        if (!config_lookup_type<T>(&inCfg, key, &val))
             panic("Type error on optional setting %s, expected type %s", key, getTypeName<T>());
     } else {
         val = def;
     }
-    writeVar(outCfg, key, val);
+    writeVar(&outCfg, key, val);
     return val;
 }
 
 template<typename T>
 T Config::genericGet(const char* key) {
     T val;
-    config_setting_t *setting = config_lookup(inCfg, key);
+    config_setting_t *setting = config_lookup(&inCfg, key);
     if (setting) {
-        if (!config_lookup_type<T>(inCfg, key, &val))
+        if (!config_lookup_type<T>(&inCfg, key, &val))
             panic("Type error on optional setting %s, expected type %s", key, getTypeName<T>());
     } else {
         panic("Mandatory setting %s (%s) not found", key, getTypeName<T>())
     }
-    writeVar(outCfg, key, val);
+    writeVar(&outCfg, key, val);
     return val;
 }
 
@@ -299,7 +299,7 @@ template<> double Config::get<double>(const char* key, double def) {return (doub
 
 //Get subgroups in a specific key
 void Config::subgroups(const char* key, std::vector<const char*>& grps) {
-    config_setting_t *s = config_lookup(inCfg, key);
+    config_setting_t *s = config_lookup(&inCfg, key);
     if (s) {
         uint32_t n = config_setting_length(s);
         for (uint32_t i = 0; i < n; i++) {

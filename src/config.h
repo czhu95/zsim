@@ -60,8 +60,8 @@ class Config {
         libconfig::Config *inCfg;
         libconfig::Config *outCfg;
 #else
-        struct config_t* inCfg;
-        struct config_t* outCfg;
+        struct config_t inCfg;
+        struct config_t outCfg;
 #endif
 
     public:
