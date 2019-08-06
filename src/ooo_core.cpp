@@ -31,6 +31,7 @@
 #include "decoder.h"
 #include "filter_cache.h"
 #include "zsim.h"
+#include "tlb.h"
 
 /* Uncomment to induce backpressure to the IW when the load/store buffers fill up. In theory, more detailed,
  * but sometimes much slower (as it relies on range poisoning in the IW, potentially O(n^2)), and in practice
@@ -40,6 +41,8 @@
 
 #define DEBUG_MSG(args...)
 //#define DEBUG_MSG(args...) info(args)
+//
+#define finfo(args...) // if (curCycle > 4000000000) info(args)
 
 // Core parameters
 // TODO(dsm): Make OOOCore templated, subsuming these
@@ -53,9 +56,10 @@
 #define L1D_LAT 4  // fixed, and FilterCache does not include L1 delay
 #define FETCH_BYTES_PER_CYCLE 16
 #define ISSUES_PER_CYCLE 4
-#define RF_READS_PER_CYCLE 3
+#define RF_READS_PER_CYCLE 5
 
-OOOCore::OOOCore(FilterCache* _l1i, FilterCache* _l1d, g_string& _name) : Core(_name), l1i(_l1i), l1d(_l1d), cRec(0, _name) {
+OOOCore::OOOCore(TLB* _itlb, TLB* _dtlb, FilterCache* _l1i, FilterCache* _l1d, g_string& _name) :
+        Core(_name), itlb(_itlb), dtlb(_dtlb), l1i(_l1i), l1d(_l1d), cRec(0, _name) {
     decodeCycle = DECODE_STAGE;  // allow subtracting from it
     curCycle = 0;
     phaseEndCycle = zinfo->phaseLength;
@@ -180,11 +184,12 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
     for (uint32_t i = 0; i < bbl->uops; i++) {
         DynUop* uop = &(bbl->uop[i]);
 
+        // finfo("1: %ld", curCycle);
         // Decode stalls
         uint32_t decDiff = uop->decCycle - prevDecCycle;
         decodeCycle = MAX(decodeCycle + decDiff, uopQueue.minAllocCycle());
         if (decodeCycle > curCycle) {
-            //info("Decode stall %ld %ld | %d %d", decodeCycle, curCycle, uop->decCycle, prevDecCycle);
+            // finfo("Decode stall %ld %ld | %d %d", decodeCycle, curCycle, uop->decCycle, prevDecCycle);
             uint32_t cdDiff = decodeCycle - curCycle;
 #ifdef OOO_STALL_STATS
             profDecodeStalls.inc(cdDiff);
@@ -195,6 +200,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
         }
         prevDecCycle = uop->decCycle;
         uopQueue.markLeave(curCycle);
+        // finfo("2: %ld", curCycle);
 
         // Implement issue width limit --- we can only issue 4 uops/cycle
         if (curCycleIssuedUops >= ISSUES_PER_CYCLE) {
@@ -207,6 +213,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
             insWindow.advancePos(curCycle);
         }
         curCycleIssuedUops++;
+        // finfo("3: %ld", curCycle);
 
         // Kill dependences on invalid register
         // Using curCycle saves us two unpredictable branches in the RF read stalls code
@@ -232,9 +239,10 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
         // Model RAT + ROB + RS delay between issue and dispatch
         uint64_t dispatchCycle = MAX(cOps, MAX(c2, c3) + (DISPATCH_STAGE - ISSUE_STAGE));
 
-        // info("IW 0x%lx %d %ld %ld %x", bblAddr, i, c2, dispatchCycle, uop->portMask);
+        finfo("IW 0x%lx %d %ld %ld %ld %ld %x %x", bblAddr, i, cOps, c2, c3, dispatchCycle, uop->portMask, uop->type);
         // NOTE: Schedule can adjust both cur and dispatch cycles
         insWindow.schedule(curCycle, dispatchCycle, uop->portMask, uop->extraSlots);
+        // finfo("4: %ld", curCycle);
 
         // If we have advanced, we need to reset the curCycle counters
         if (curCycle > c3) {
@@ -267,9 +275,16 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
 
                     Address addr = loadAddrs[loadIdx++];
                     uint64_t reqSatisfiedCycle = dispatchCycle;
+                    uint64_t translationCycle = dispatchCycle;
                     if (addr != ((Address)-1L)) {
-                        reqSatisfiedCycle = l1d->load(addr, dispatchCycle) + L1D_LAT;
-                        cRec.record(curCycle, dispatchCycle, reqSatisfiedCycle);
+                        translationCycle = dtlb->translate(addr, dispatchCycle);
+                        cRec.record(curCycle, dispatchCycle, translationCycle);
+                        // translationCycle = dispatchCycle;
+                        // info("dispatchCycle: %ld", dispatchCycle);
+                        // info("translationCycle: %ld", translationCycle);
+                        reqSatisfiedCycle = l1d->load(addr, translationCycle) + L1D_LAT;
+                        cRec.record(curCycle, translationCycle, reqSatisfiedCycle);
+                        // info("UOP_LOAD Dispatch: %ld, reqSatisfied: %ld, lat: %ld", dispatchCycle, reqSatisfiedCycle, reqSatisfiedCycle - dispatchCycle);
                     }
 
                     // Enforce st-ld forwarding
@@ -282,8 +297,9 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
                          * availCycle on a store. This allows FilterCache to
                          * track per-line, not per-word availCycles.
                          */
-                        reqSatisfiedCycle = MAX(reqSatisfiedCycle, fwdArray[fwdIdx].storeCycle);
+                        reqSatisfiedCycle = MIN(reqSatisfiedCycle, fwdArray[fwdIdx].storeCycle);
                     }
+                    // info("Dispatch: %ld, reqSatisfied: %ld, lat: %d", dispatchCycle, reqSatisfiedCycle, L1D_LAT);
 
                     commitCycle = reqSatisfiedCycle;
                     loadQueue.markRetire(commitCycle);
@@ -305,11 +321,14 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
                     dispatchCycle = MAX(lastStoreAddrCommitCycle+1, dispatchCycle);
 
                     Address addr = storeAddrs[storeIdx++];
-                    uint64_t reqSatisfiedCycle = l1d->store(addr, dispatchCycle) + L1D_LAT;
-                    cRec.record(curCycle, dispatchCycle, reqSatisfiedCycle);
+                    uint64_t translationCycle = dtlb->translate(addr, dispatchCycle);
+                    cRec.record(curCycle, dispatchCycle, translationCycle);
+                    uint64_t reqSatisfiedCycle = l1d->store(addr, translationCycle) + L1D_LAT;
+                    cRec.record(curCycle, translationCycle, reqSatisfiedCycle);
+                    // info("UOP_STORE Dispatch: %ld, reqSatisfied: %ld, lat: %ld", dispatchCycle, reqSatisfiedCycle, reqSatisfiedCycle - dispatchCycle);
 
                     // Fill the forwarding table
-                    fwdArray[(addr>>2) & (FWD_ENTRIES-1)].set(addr, reqSatisfiedCycle);
+                    fwdArray[(addr>>2) & (FWD_ENTRIES-1)].set(addr, dispatchCycle);
 
                     commitCycle = reqSatisfiedCycle;
                     lastStoreCommitCycle = MAX(lastStoreCommitCycle, reqSatisfiedCycle);
@@ -341,7 +360,8 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
 
         lastCommitCycle = commitCycle;
 
-        //info("0x%lx %3d [%3d %3d] -> [%3d %3d]  %8ld %8ld %8ld %8ld", bbl->addr, i, uop->rs[0], uop->rs[1], uop->rd[0], uop->rd[1], decCycle, c3, dispatchCycle, commitCycle);
+        finfo("0x%lx %3d [%3d %3d] -> [%3d %3d]  %8ld %8ld %8ld %8ld", bbl->addr, i, uop->rs[0], uop->rs[1], uop->rd[0], uop->rd[1], decodeCycle, c3, dispatchCycle, commitCycle);
+        // finfo("4: %ld", curCycle);
     }
 
     instrs += bblInstrs;
@@ -425,8 +445,10 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
         // Do not model fetch throughput limit here, decoder-generated stalls already include it
         // We always call fetches with curCycle to avoid upsetting the weave
         // models (but we could move to a fetch-centric recorder to avoid this)
-        uint64_t fetchLat = l1i->load(fetchAddr, curCycle) - curCycle;
-        cRec.record(curCycle, curCycle, curCycle + fetchLat);
+        uint64_t translateCycle = itlb->translate(fetchAddr, curCycle);
+        cRec.record(curCycle, curCycle, translateCycle);
+        uint64_t fetchLat = l1i->load(fetchAddr, translateCycle) - curCycle;
+        cRec.record(curCycle, translateCycle, curCycle + fetchLat);
         fetchCycle += fetchLat;
     }
 
@@ -436,10 +458,11 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
     uint64_t minFetchDecCycle = fetchCycle + (DECODE_STAGE - FETCH_STAGE);
     if (minFetchDecCycle > decodeCycle) {
 #ifdef OOO_STALL_STATS
-        profFetchStalls.inc(decodeCycle - minFetchDecCycle);
+        profFetchStalls.inc(minFetchDecCycle - decodeCycle);
 #endif
-        decodeCycle = minFetchDecCycle;
+        // decodeCycle = minFetchDecCycle;
     }
+    // finfo("5: %ld", curCycle);
 }
 
 // Timing simulation code
@@ -476,6 +499,7 @@ void OOOCore::advance(uint64_t targetCycle) {
     curCycleRFReads = 0;
     curCycleIssuedUops = 0;
     assert(targetCycle == curCycle);
+    // finfo("Long advance to %ld", curCycle);
     /* NOTE: Validation with weave mems shows that not advancing internal cycle
      * counters in e.g., the ROB does not change much; consider full-blown
      * rebases though if weave models fail to validate for some app.

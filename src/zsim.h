@@ -188,6 +188,8 @@ struct GlobSimInfo {
 extern Core* cores[MAX_THREADS]; //tid->core array
 extern uint32_t procIdx;
 extern uint32_t lineBits; //process-local for performance, but logically global
+extern uint32_t pageBits;
+extern uint32_t pteSize;
 extern uint64_t procMask;
 
 extern GlobSimInfo* zinfo;

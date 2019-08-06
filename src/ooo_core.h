@@ -36,7 +36,7 @@
 #include "pad.h"
 
 // Uncomment to enable stall stats
-// #define OOO_STALL_STATS
+#define OOO_STALL_STATS
 
 class FilterCache;
 
@@ -357,9 +357,13 @@ class CycleQueue {
 };
 
 struct BblInfo;
+class TLB;
 
 class OOOCore : public Core {
     private:
+        TLB* itlb;
+        TLB* dtlb;
+
         FilterCache* l1i;
         FilterCache* l1d;
 
@@ -434,7 +438,7 @@ class OOOCore : public Core {
         OOOCoreRecorder cRec;
 
     public:
-        OOOCore(FilterCache* _l1i, FilterCache* _l1d, g_string& _name);
+        OOOCore(TLB* _itlb, TLB* _dtlb, FilterCache* _l1i, FilterCache* _l1d, g_string& _name);
 
         void initStats(AggregateStat* parentStat);
 

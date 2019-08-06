@@ -69,6 +69,7 @@
 #include "timing_cache.h"
 #include "timing_core.h"
 #include "timing_event.h"
+#include "tlb.h"
 #include "trace_driver.h"
 #include "tracing_cache.h"
 #include "virt/port_virtualizer.h"
@@ -82,48 +83,10 @@ extern void EndOfPhaseActions(); //in zsim.cpp
  * follow the layout of zinfo, top-down.
  */
 
-BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, uint32_t bankSize, bool isTerminal, uint32_t domain) {
-    string type = config.get<const char*>(prefix + "type", "Simple");
-    // Shortcut for TraceDriven type
-    if (type == "TraceDriven") {
-        assert(zinfo->traceDriven);
-        assert(isTerminal);
-        return new TraceDriverProxyCache(name);
-    }
-
-    uint32_t lineSize = zinfo->lineSize;
-    assert(lineSize > 0); //avoid config deps
-    if (bankSize % lineSize != 0) panic("%s: Bank size must be a multiple of line size", name.c_str());
-
-    uint32_t numLines = bankSize/lineSize;
-
-    //Array
-    uint32_t numHashes = 1;
-    uint32_t ways = config.get<uint32_t>(prefix + "array.ways", 4);
-    string arrayType = config.get<const char*>(prefix + "array.type", "SetAssoc");
-    uint32_t candidates = (arrayType == "Z")? config.get<uint32_t>(prefix + "array.candidates", 16) : ways;
-
-    //Need to know number of hash functions before instantiating array
-    if (arrayType == "SetAssoc") {
-        numHashes = 1;
-    } else if (arrayType == "Z") {
-        numHashes = ways;
-        assert(ways > 1);
-    } else if (arrayType == "IdealLRU" || arrayType == "IdealLRUPart") {
-        ways = numLines;
-        numHashes = 0;
-    } else {
-        panic("%s: Invalid array type %s", name.c_str(), arrayType.c_str());
-    }
-
-    // Power of two sets check; also compute setBits, will be useful later
-    uint32_t numSets = numLines/ways;
-    uint32_t setBits = 31 - __builtin_clz(numSets);
-    if ((1u << setBits) != numSets) panic("%s: Number of sets must be a power of two (you specified %d sets)", name.c_str(), numSets);
-
+HashFamily* BuildHash(const string& prefix, g_string& name, const string& hashType,
+                      uint32_t numHashes, uint32_t setBits, const string& arrayType) {
     //Hash function
     HashFamily* hf = nullptr;
-    string hashType = config.get<const char*>(prefix + "array.hash", (arrayType == "Z")? "H3" : "None"); //zcaches must be hashed by default
     if (numHashes) {
         if (hashType == "None") {
             if (arrayType == "Z") panic("ZCaches must be hashed!"); //double check for stupid user
@@ -140,9 +103,12 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
             panic("%s: Invalid value %s on array.hash", name.c_str(), hashType.c_str());
         }
     }
+    return hf;
+}
 
-    //Replacement policy
-    string replType = config.get<const char*>(prefix + "repl.type", (arrayType == "IdealLRUPart")? "IdealLRUPart" : "LRU");
+ReplPolicy* BuildRepl(Config& config, const string& prefix, g_string& name, const string& replType,
+                      const string& arrayType, uint32_t numLines, uint32_t ways, uint32_t candidates,
+                      bool isTerminal) {
     ReplPolicy* rp = nullptr;
 
     if (replType == "LRU" || replType == "LRUNoSh") {
@@ -228,8 +194,11 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     }
     assert(rp);
 
+    return rp;
+}
 
-    //Alright, build the array
+CacheArray* BuildCacheArray(const string& arrayType, uint32_t numLines, uint32_t ways,
+                            const string& replType, uint32_t candidates, ReplPolicy* rp, HashFamily* hf) {
     CacheArray* array = nullptr;
     if (arrayType == "SetAssoc") {
         array = new SetAssocArray(numLines, ways, rp, hf);
@@ -249,6 +218,179 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     } else {
         panic("This should not happen, we already checked for it!"); //unless someone changed arrayStr...
     }
+    return array;
+}
+
+
+
+BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, uint32_t bankSize, bool isTerminal, uint32_t domain) {
+    string type = config.get<const char*>(prefix + "type", "Simple");
+    // Shortcut for TraceDriven type
+    if (type == "TraceDriven") {
+        assert(zinfo->traceDriven);
+        assert(isTerminal);
+        return new TraceDriverProxyCache(name);
+    }
+
+    uint32_t lineSize = zinfo->lineSize;
+    assert(lineSize > 0); //avoid config deps
+    if (bankSize % lineSize != 0) panic("%s: Bank size must be a multiple of line size", name.c_str());
+
+    uint32_t numLines = bankSize/lineSize;
+
+    //Array
+    uint32_t numHashes = 1;
+    uint32_t ways = config.get<uint32_t>(prefix + "array.ways", 4);
+    string arrayType = config.get<const char*>(prefix + "array.type", "SetAssoc");
+    uint32_t candidates = (arrayType == "Z")? config.get<uint32_t>(prefix + "array.candidates", 16) : ways;
+
+    //Need to know number of hash functions before instantiating array
+    if (arrayType == "SetAssoc") {
+        numHashes = 1;
+    } else if (arrayType == "Z") {
+        numHashes = ways;
+        assert(ways > 1);
+    } else if (arrayType == "IdealLRU" || arrayType == "IdealLRUPart") {
+        ways = numLines;
+        numHashes = 0;
+    } else {
+        panic("%s: Invalid array type %s", name.c_str(), arrayType.c_str());
+    }
+
+    // Power of two sets check; also compute setBits, will be useful later
+    uint32_t numSets = numLines/ways;
+    uint32_t setBits = 31 - __builtin_clz(numSets);
+    if ((1u << setBits) != numSets) panic("%s: Number of sets must be a power of two (you specified %d sets)", name.c_str(), numSets);
+
+    //Hash function
+    string hashType = config.get<const char*>(prefix + "array.hash", (arrayType == "Z")? "H3" : "None"); //zcaches must be hashed by default
+    HashFamily* hf = BuildHash(prefix, name, hashType, numHashes, setBits, arrayType);
+    // if (numHashes) {
+    //     if (hashType == "None") {
+    //         if (arrayType == "Z") panic("ZCaches must be hashed!"); //double check for stupid user
+    //         assert(numHashes == 1);
+    //         hf = new IdHashFamily;
+    //     } else if (hashType == "H3") {
+    //         //STL hash function
+    //         size_t seed = _Fnv_hash_bytes(prefix.c_str(), prefix.size()+1, 0xB4AC5B);
+    //         //info("%s -> %lx", prefix.c_str(), seed);
+    //         hf = new H3HashFamily(numHashes, setBits, 0xCAC7EAFFA1 + seed /*make randSeed depend on prefix*/);
+    //     } else if (hashType == "SHA1") {
+    //         hf = new SHA1HashFamily(numHashes);
+    //     } else {
+    //         panic("%s: Invalid value %s on array.hash", name.c_str(), hashType.c_str());
+    //     }
+    // }
+
+    //Replacement policy
+    string replType = config.get<const char*>(prefix + "repl.type", (arrayType == "IdealLRUPart")? "IdealLRUPart" : "LRU");
+    ReplPolicy* rp = BuildRepl(config, prefix, name, replType, arrayType, numLines, ways, candidates, isTerminal);
+
+
+    // if (replType == "LRU" || replType == "LRUNoSh") {
+    //     bool sharersAware = (replType == "LRU") && !isTerminal;
+    //     if (sharersAware) {
+    //         rp = new LRUReplPolicy<true>(numLines);
+    //     } else {
+    //         rp = new LRUReplPolicy<false>(numLines);
+    //     }
+    // } else if (replType == "LFU") {
+    //     rp = new LFUReplPolicy(numLines);
+    // } else if (replType == "LRUProfViol") {
+    //     ProfViolReplPolicy< LRUReplPolicy<true> >* pvrp = new ProfViolReplPolicy< LRUReplPolicy<true> >(numLines);
+    //     pvrp->init(numLines);
+    //     rp = pvrp;
+    // } else if (replType == "TreeLRU") {
+    //     rp = new TreeLRUReplPolicy(numLines, candidates);
+    // } else if (replType == "NRU") {
+    //     rp = new NRUReplPolicy(numLines, candidates);
+    // } else if (replType == "Rand") {
+    //     rp = new RandReplPolicy(candidates);
+    // } else if (replType == "WayPart" || replType == "Vantage" || replType == "IdealLRUPart") {
+    //     if (replType == "WayPart" && arrayType != "SetAssoc") panic("WayPart replacement requires SetAssoc array");
+
+    //     //Partition mapper
+    //     // TODO: One partition mapper per cache (not bank).
+    //     string partMapper = config.get<const char*>(prefix + "repl.partMapper", "Core");
+    //     PartMapper* pm = nullptr;
+    //     if (partMapper == "Core") {
+    //         pm = new CorePartMapper(zinfo->numCores); //NOTE: If the cache is not fully shared, trhis will be inefficient...
+    //     } else if (partMapper == "InstrData") {
+    //         pm = new InstrDataPartMapper();
+    //     } else if (partMapper == "InstrDataCore") {
+    //         pm = new InstrDataCorePartMapper(zinfo->numCores);
+    //     } else if (partMapper == "Process") {
+    //         pm = new ProcessPartMapper(zinfo->numProcs);
+    //     } else if (partMapper == "InstrDataProcess") {
+    //         pm = new InstrDataProcessPartMapper(zinfo->numProcs);
+    //     } else if (partMapper == "ProcessGroup") {
+    //         pm = new ProcessGroupPartMapper();
+    //     } else {
+    //         panic("Invalid repl.partMapper %s on %s", partMapper.c_str(), name.c_str());
+    //     }
+
+    //     // Partition monitor
+    //     uint32_t umonLines = config.get<uint32_t>(prefix + "repl.umonLines", 256);
+    //     uint32_t umonWays = config.get<uint32_t>(prefix + "repl.umonWays", ways);
+    //     uint32_t buckets;
+    //     if (replType == "WayPart") {
+    //         buckets = ways; //not an option with WayPart
+    //     } else { //Vantage or Ideal
+    //         buckets = config.get<uint32_t>(prefix + "repl.buckets", 256);
+    //     }
+
+    //     PartitionMonitor* mon = new UMonMonitor(numLines, umonLines, umonWays, pm->getNumPartitions(), buckets);
+
+    //     //Finally, instantiate the repl policy
+    //     PartReplPolicy* prp;
+    //     double allocPortion = 1.0;
+    //     if (replType == "WayPart") {
+    //         //if set, drives partitioner but doesn't actually do partitioning
+    //         bool testMode = config.get<bool>(prefix + "repl.testMode", false);
+    //         prp = new WayPartReplPolicy(mon, pm, numLines, ways, testMode);
+    //     } else if (replType == "IdealLRUPart") {
+    //         prp = new IdealLRUPartReplPolicy(mon, pm, numLines, buckets);
+    //     } else { //Vantage
+    //         uint32_t assoc = (arrayType == "Z")? candidates : ways;
+    //         allocPortion = .85;
+    //         bool smoothTransients = config.get<bool>(prefix + "repl.smoothTransients", false);
+    //         prp = new VantageReplPolicy(mon, pm, numLines, assoc, (uint32_t)(allocPortion * 100), 10, 50, buckets, smoothTransients);
+    //     }
+    //     rp = prp;
+
+    //     // Partitioner
+    //     // TODO: Depending on partitioner type, we want one per bank or one per cache.
+    //     Partitioner* p = new LookaheadPartitioner(prp, pm->getNumPartitions(), buckets, 1, allocPortion);
+
+    //     //Schedule its tick
+    //     uint32_t interval = config.get<uint32_t>(prefix + "repl.interval", 5000); //phases
+    //     zinfo->eventQueue->insert(new Partitioner::PartitionEvent(p, interval));
+    // } else {
+    //     panic("%s: Invalid replacement type %s", name.c_str(), replType.c_str());
+    // }
+    // assert(rp);
+
+
+    //Alright, build the array
+    CacheArray* array = BuildCacheArray(arrayType, numLines, ways, replType, candidates, rp, hf);
+    // if (arrayType == "SetAssoc") {
+    //     array = new SetAssocArray(numLines, ways, rp, hf);
+    // } else if (arrayType == "Z") {
+    //     array = new ZArray(numLines, ways, candidates, rp, hf);
+    // } else if (arrayType == "IdealLRU") {
+    //     assert(replType == "LRU");
+    //     assert(!hf);
+    //     IdealLRUArray* ila = new IdealLRUArray(numLines);
+    //     rp = ila->getRP();
+    //     array = ila;
+    // } else if (arrayType == "IdealLRUPart") {
+    //     assert(!hf);
+    //     IdealLRUPartReplPolicy* irp = dynamic_cast<IdealLRUPartReplPolicy*>(rp);
+    //     if (!irp) panic("IdealLRUPart array needs IdealLRUPart repl policy!");
+    //     array = new IdealLRUPartArray(numLines, irp);
+    // } else {
+    //     panic("This should not happen, we already checked for it!"); //unless someone changed arrayStr...
+    // }
 
     //Latency
     uint32_t latency = config.get<uint32_t>(prefix + "latency", 10);
@@ -457,13 +599,6 @@ static void InitSystem(Config& config) {
         }
     }
 
-    // Check that children are valid (another cache)
-    for (auto& it : parentMap) {
-        bool found = false;
-        for (auto& grp : cacheGroupNames) found |= it.first == grp;
-        if (!found) panic("%s has invalid child %s", it.second.c_str(), it.first.c_str());
-    }
-
     // Get the (single) LLC
     vector<string> parentlessCacheGroups;
     for (auto& it : childMap) if (!parentMap.count(it.first)) parentlessCacheGroups.push_back(it.first);
@@ -481,9 +616,79 @@ static void InitSystem(Config& config) {
     while (!fringe.empty()) {
         string group = fringe.front();
         fringe.pop_front();
+
+        // Skip TLBs.
+        if (childMap.count(group) == 0) continue;
         if (cMap.count(group)) panic("The cache 'tree' has a loop at %s", group.c_str());
         cMap[group] = BuildCacheGroup(config, group, isTerminal(group));
         for (auto& childVec : childMap[group]) fringe.insert(fringe.end(), childVec.begin(), childVec.end());
+    }
+
+    // Get TLBs
+    unordered_map<string, vector<TLB*>> tlbMap;
+    vector<const char*> tlbGroupNames;
+    config.subgroups("sys.tlbs", tlbGroupNames);
+
+    for (const char* group : tlbGroupNames) {
+        tlbMap[group] = vector<TLB*>();
+        string grp_str = string(group);
+        string prefix = string("sys.tlbs.") + group + ".";
+        // uint32_t tlbs = config.get<uint32_t>(prefix + "tlbs", 1);
+        uint32_t numLines = 64; config.get<uint32_t>(prefix + "lines", 64);
+        uint32_t ways = 4; config.get<uint32_t>(prefix + "array.ways", 4);
+        g_string name(group);
+
+        if (grp_str == "mem") panic("'mem' is an invalid TLB group name");
+        if (childMap.count(grp_str)) panic("Duplicate TLB group %s", group);
+
+        string children = config.get<const char*>(prefix + "children", "");
+        info("Adding %s to childMap", group);
+        childMap[grp_str] = parseChildren(children);
+        for (auto v : childMap[grp_str]) for (auto child : v) {
+            if (parentMap.count(child)) {
+                panic("TLB group %s can have only one parent (%s and %s found)", child.c_str(), parentMap[child].c_str(), group);
+            }
+            parentMap[child] = grp_str;
+        }
+
+        uint32_t numHashes = 1;
+        uint32_t numSets = numLines/ways;
+        uint32_t setBits = 31 - __builtin_clz(numSets);
+        if ((1u << setBits) != numSets) panic("%s: Number of sets must be a power of two (you specified %d sets)", name.c_str(), numSets);
+
+
+        string arrayType = config.get<const char*>(prefix + "array.type", "SetAssoc");
+        uint32_t candidates = (arrayType == "Z")? config.get<uint32_t>(prefix + "array.candidates", 16) : ways;
+
+        // Hash function
+        string hashType = config.get<const char*>(prefix + "array.hash", (arrayType == "Z")? "H3" : "None"); //zcaches must be hashed by default
+        HashFamily* hf = BuildHash(prefix, name, hashType, numHashes, setBits, arrayType);
+
+        // Replacement policy
+        string replType = config.get<const char*>(prefix + "repl.type", (arrayType == "IdealLRUPart")? "IdealLRUPart" : "LRU");
+        ReplPolicy* rp = BuildRepl(config, prefix, name, replType, arrayType, numLines, ways, candidates, true);
+
+        // Cache array
+        CacheArray* array = BuildCacheArray(arrayType, numLines, ways, replType, candidates, rp, hf);
+
+        // Coherence Control
+        CC* cc = new MESITerminalCC(numLines, name);
+        rp->setCC(cc);
+
+        // Latencies
+        uint32_t latency = config.get<uint32_t>(prefix + "latency", 10);
+        uint32_t accLat = 0; // TLB translates latency hidden by l1 cache.
+        uint32_t invLat = latency;
+
+        TLB* tlb = new TLB(numLines, cc, array, rp, accLat, invLat, name);
+        tlbMap[group].push_back(tlb);
+
+        // Also create cache group entry in cMap.
+        CacheGroup* cgp = new CacheGroup;
+        cgp->resize(1);
+        (*cgp)[0].resize(1);
+        (*cgp)[0][0] = static_cast<BaseCache*>(tlb);
+        cMap[group] = cgp;
     }
 
     //Check single LLC
@@ -518,6 +723,14 @@ static void InitSystem(Config& config) {
         }
     }
 
+    // Check that children are valid (another cache)
+    for (auto& it : parentMap) {
+        bool found = false;
+        for (auto& grp : cacheGroupNames) found |= it.first == grp;
+        for (auto& grp : tlbGroupNames) found |= it.first == grp;
+        if (!found) panic("%s has invalid child %s", it.second.c_str(), it.first.c_str());
+    }
+
     //Connect everything
     bool printHierarchy = config.get<bool>("sim.printHierarchy", false);
 
@@ -527,7 +740,7 @@ static void InitSystem(Config& config) {
         llcBank->setParents(childId++, mems, network);
     }
 
-    // Rest of caches
+    // Rest of caches and TLB
     for (const char* grp : cacheGroupNames) {
         if (isTerminal(grp)) continue; //skip terminal caches
 
@@ -680,6 +893,19 @@ static void InitSystem(Config& config) {
                     dc->setSourceId(coreIdx);
                     assignedCaches[dcache]++;
 
+                    //Get TLBs
+                    string itlb = config.get<const char*>(prefix + "itlb", "null");
+                    string dtlb = config.get<const char*>(prefix + "dtlb", "null");
+
+                    TLB* it = tlbMap[itlb][0];
+                    assert(it);
+                    it->setSourceId(coreIdx);
+                    it->setFlags(MemReq::IFETCH | MemReq::NOEXCL);
+                    TLB* dt = tlbMap[dtlb][0];
+                    assert(dt);
+                    dt->setSourceId(coreIdx);
+                    dt->setFlags(MemReq::NOEXCL);
+
                     //Build the core
                     if (type == "Simple") {
                         core = new (&simpleCores[j]) SimpleCore(ic, dc, name);
@@ -691,7 +917,7 @@ static void InitSystem(Config& config) {
                         core = tcore;
                     } else {
                         assert(type == "OOO");
-                        OOOCore* ocore = new (&oooCores[j]) OOOCore(ic, dc, name);
+                        OOOCore* ocore = new (&oooCores[j]) OOOCore(it, dt, ic, dc, name);
                         zinfo->eventRecorders[coreIdx] = ocore->getEventRecorder();
                         zinfo->eventRecorders[coreIdx]->setSourceId(coreIdx);
                         core = ocore;

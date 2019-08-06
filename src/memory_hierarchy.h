@@ -97,6 +97,7 @@ struct MemReq {
         NONINCLWB     = (1<<3), //This is a non-inclusive writeback. Do not assume that the line was in the lower level. Used on NUCA (BankDir).
         PUTX_KEEPEXCL = (1<<4), //Non-relinquishing PUTX. On a PUTX, maintain the requestor's E state instead of removing the sharer (i.e., this is a pure writeback)
         PREFETCH      = (1<<5), //Prefetch GETS access. Only set at level where prefetch is issued; handled early in MESICC
+        PTEFETCH      = (1<<6), //Fetching a PTE from cache. May repitively GETS the same line that has multiple PTEs.
     };
     uint32_t flags;
 
@@ -110,6 +111,12 @@ struct InvReq {
     InvType type;
     // NOTE: writeback should start false, children pull it up to true
     bool* writeback;
+    uint64_t cycle;
+    uint32_t srcId;
+};
+
+struct TLBReq {
+    Address pageNum;
     uint64_t cycle;
     uint32_t srcId;
 };

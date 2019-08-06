@@ -287,7 +287,7 @@ uint64_t MESITopCC::processAccess(Address lineAddr, uint32_t lineId, AccessType 
                 *childState = E;
             } else {
                 //Give in S state
-                assert(e->sharers[childId] == false);
+                assert(e->sharers[childId] == false || (flags & MemReq::PTEFETCH));
 
                 if (e->isExclusive()) {
                     //Downgrade the exclusive sharer
