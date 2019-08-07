@@ -423,6 +423,8 @@ class OOOCore : public Core {
         Counter profFetchStalls, profDecodeStalls, profIssueStalls;
 #endif
 
+        Counter profDTLBCycles, profITLBCycles;
+
         // Load-store forwarding
         // Just a direct-mapped array of last store cycles to 4B-wide blocks
         // (i.e., indexed by (addr >> 2) & (FWD_ENTRIES-1))

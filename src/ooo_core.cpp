@@ -42,7 +42,7 @@
 #define DEBUG_MSG(args...)
 //#define DEBUG_MSG(args...) info(args)
 //
-#define finfo(args...) // if (curCycle > 4000000000) info(args)
+#define finfo(args...) // info(args)
 
 // Core parameters
 // TODO(dsm): Make OOOCore templated, subsuming these
@@ -116,6 +116,9 @@ void OOOCore::initStats(AggregateStat* parentStat) {
     profDecodeStalls.init("decodeStalls", "Decode stalls"); coreStat->append(&profDecodeStalls);
     profIssueStalls.init("issueStalls",  "Issue stalls");  coreStat->append(&profIssueStalls);
 #endif
+
+    profDTLBCycles.init("DTLBcycles", "DTLB cycles"); coreStat->append(&profDTLBCycles);
+    profITLBCycles.init("ITLBcycles", "ITLB cycles"); coreStat->append(&profITLBCycles);
 
     parentStat->append(coreStat);
 }
@@ -275,15 +278,18 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
 
                     Address addr = loadAddrs[loadIdx++];
                     uint64_t reqSatisfiedCycle = dispatchCycle;
-                    uint64_t translationCycle = dispatchCycle;
+                    uint64_t translateCycle = dispatchCycle;
                     if (addr != ((Address)-1L)) {
-                        translationCycle = dtlb->translate(addr, dispatchCycle);
-                        cRec.record(curCycle, dispatchCycle, translationCycle);
-                        // translationCycle = dispatchCycle;
+                        if (dtlb) {
+                            translateCycle = dtlb->translate(addr, dispatchCycle);
+                            profDTLBCycles.inc(translateCycle - dispatchCycle);
+                            cRec.record(curCycle, dispatchCycle, translateCycle);
+                        }
+                        // translateCycle = dispatchCycle;
                         // info("dispatchCycle: %ld", dispatchCycle);
-                        // info("translationCycle: %ld", translationCycle);
-                        reqSatisfiedCycle = l1d->load(addr, translationCycle) + L1D_LAT;
-                        cRec.record(curCycle, translationCycle, reqSatisfiedCycle);
+                        // info("translateCycle: %ld", translateCycle);
+                        reqSatisfiedCycle = l1d->load(addr, translateCycle) + L1D_LAT;
+                        cRec.record(curCycle, translateCycle, reqSatisfiedCycle);
                         // info("UOP_LOAD Dispatch: %ld, reqSatisfied: %ld, lat: %ld", dispatchCycle, reqSatisfiedCycle, reqSatisfiedCycle - dispatchCycle);
                     }
 
@@ -321,10 +327,14 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
                     dispatchCycle = MAX(lastStoreAddrCommitCycle+1, dispatchCycle);
 
                     Address addr = storeAddrs[storeIdx++];
-                    uint64_t translationCycle = dtlb->translate(addr, dispatchCycle);
-                    cRec.record(curCycle, dispatchCycle, translationCycle);
-                    uint64_t reqSatisfiedCycle = l1d->store(addr, translationCycle) + L1D_LAT;
-                    cRec.record(curCycle, translationCycle, reqSatisfiedCycle);
+                    uint64_t translateCycle = dispatchCycle;
+                    if (dtlb) {
+                        translateCycle = dtlb->translate(addr, dispatchCycle);
+                        profDTLBCycles.inc(translateCycle - dispatchCycle);
+                        cRec.record(curCycle, dispatchCycle, translateCycle);
+                    }
+                    uint64_t reqSatisfiedCycle = l1d->store(addr, translateCycle) + L1D_LAT;
+                    cRec.record(curCycle, translateCycle, reqSatisfiedCycle);
                     // info("UOP_STORE Dispatch: %ld, reqSatisfied: %ld, lat: %ld", dispatchCycle, reqSatisfiedCycle, reqSatisfiedCycle - dispatchCycle);
 
                     // Fill the forwarding table
@@ -445,8 +455,12 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
         // Do not model fetch throughput limit here, decoder-generated stalls already include it
         // We always call fetches with curCycle to avoid upsetting the weave
         // models (but we could move to a fetch-centric recorder to avoid this)
-        uint64_t translateCycle = itlb->translate(fetchAddr, curCycle);
-        cRec.record(curCycle, curCycle, translateCycle);
+        uint64_t translateCycle = curCycle;
+        if (itlb) {
+            translateCycle = itlb->translate(fetchAddr, curCycle);
+            profITLBCycles.inc(translateCycle - curCycle);
+            cRec.record(curCycle, curCycle, translateCycle);
+        }
         uint64_t fetchLat = l1i->load(fetchAddr, translateCycle) - curCycle;
         cRec.record(curCycle, translateCycle, curCycle + fetchLat);
         fetchCycle += fetchLat;

@@ -897,14 +897,19 @@ static void InitSystem(Config& config) {
                     string itlb = config.get<const char*>(prefix + "itlb", "null");
                     string dtlb = config.get<const char*>(prefix + "dtlb", "null");
 
-                    TLB* it = tlbMap[itlb][0];
-                    assert(it);
-                    it->setSourceId(coreIdx);
-                    it->setFlags(MemReq::IFETCH | MemReq::NOEXCL);
-                    TLB* dt = tlbMap[dtlb][0];
-                    assert(dt);
-                    dt->setSourceId(coreIdx);
-                    dt->setFlags(MemReq::NOEXCL);
+                    TLB *it = nullptr, *dt = nullptr;
+                    if (itlb != "null") {
+                        it = tlbMap[itlb][0];
+                        assert(it);
+                        it->setSourceId(coreIdx);
+                        it->setFlags(MemReq::IFETCH | MemReq::NOEXCL);
+                    }
+                    if (dtlb != "null") {
+                        dt = tlbMap[dtlb][0];
+                        assert(dt);
+                        dt->setSourceId(coreIdx);
+                        dt->setFlags(MemReq::NOEXCL);
+                    }
 
                     //Build the core
                     if (type == "Simple") {
