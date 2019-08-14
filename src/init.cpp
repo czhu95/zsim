@@ -634,8 +634,8 @@ static void InitSystem(Config& config) {
         string grp_str = string(group);
         string prefix = string("sys.tlbs.") + group + ".";
         // uint32_t tlbs = config.get<uint32_t>(prefix + "tlbs", 1);
-        uint32_t numLines = 64; config.get<uint32_t>(prefix + "lines", 64);
-        uint32_t ways = 4; config.get<uint32_t>(prefix + "array.ways", 4);
+        uint32_t numLines = config.get<uint32_t>(prefix + "lines", 64);
+        uint32_t ways = config.get<uint32_t>(prefix + "array.ways", 4);
         g_string name(group);
 
         if (grp_str == "mem") panic("'mem' is an invalid TLB group name");

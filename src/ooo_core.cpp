@@ -42,7 +42,7 @@
 #define DEBUG_MSG(args...)
 //#define DEBUG_MSG(args...) info(args)
 //
-#define finfo(args...) // info(args)
+#define finfo(args...) // if (bblAddr == 0x400a20) info(args)
 
 // Core parameters
 // TODO(dsm): Make OOOCore templated, subsuming these

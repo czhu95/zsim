@@ -53,7 +53,7 @@ void MESIBottomCC::init(const g_vector<MemObject*>& _parents, Network* network, 
 }
 
 
-uint64_t MESIBottomCC::processEviction(Address wbLineAddr, uint32_t lineId, bool lowerLevelWriteback, uint64_t cycle, uint32_t srcId) {
+uint64_t MESIBottomCC::processEviction(Address wbLineAddr, uint32_t lineId, bool lowerLevelWriteback, bool isPTE, uint64_t cycle, uint32_t srcId) {
     MESIState* state = &array[lineId];
     if (lowerLevelWriteback) {
         //If this happens, when tcc issued the invalidations, it got a writeback. This means we have to do a PUTX, i.e. we have to transition to M if we are in E
@@ -67,6 +67,12 @@ uint64_t MESIBottomCC::processEviction(Address wbLineAddr, uint32_t lineId, bool
         case S:
         case E:
             {
+                if (isPTE) {
+                    // Eviction of PTE doesn't involve lower level caches.
+                    *state = I;
+                    break;
+                }
+                // info("[bcc] processEviction, isPTE: %d", isPTE);
                 MemReq req = {wbLineAddr, PUTS, selfId, state, cycle, &ccLock, *state, srcId, 0 /*no flags*/};
                 respCycle = parents[getParentId(wbLineAddr)]->access(req);
             }
@@ -87,6 +93,8 @@ uint64_t MESIBottomCC::processEviction(Address wbLineAddr, uint32_t lineId, bool
 uint64_t MESIBottomCC::processAccess(Address lineAddr, uint32_t lineId, AccessType type, uint64_t cycle, uint32_t srcId, uint32_t flags) {
     uint64_t respCycle = cycle;
     MESIState* state = &array[lineId];
+    // if (flags & MemReq::PTEFETCH)
+    //     info("[bcc] Fetching PTE, flags: %x, type: %d, state: %d", flags, type, *state);
     switch (type) {
         // A PUTS/PUTX does nothing w.r.t. higher coherence levels --- it dies here
         case PUTS: //Clean writeback, nothing to do (except profiling)
@@ -123,6 +131,7 @@ uint64_t MESIBottomCC::processAccess(Address lineAddr, uint32_t lineId, AccessTy
                 else profGETXMissSM.inc();
                 uint32_t parentId = getParentId(lineAddr);
                 MemReq req = {lineAddr, GETX, selfId, state, cycle, &ccLock, *state, srcId, flags};
+                // info("[bcc] processAccess GETX, state = %d", *state);
                 uint32_t nextLevelLat = parents[parentId]->access(req) - cycle;
                 uint32_t netLat = parentRTTs[parentId];
                 profGETNextLevelLat.inc(nextLevelLat);
@@ -213,6 +222,7 @@ void MESITopCC::init(const g_vector<BaseCache*>& _children, Network* network, co
 uint64_t MESITopCC::sendInvalidates(Address lineAddr, uint32_t lineId, InvType type, bool* reqWriteback, uint64_t cycle, uint32_t srcId) {
     //Send down downgrades/invalidates
     Entry* e = &array[lineId];
+    // info("Sending invalidations to children line %lx", lineAddr);
 
     //Don't propagate downgrades if sharers are not exclusive.
     if (type == INVX && !e->isExclusive()) {
@@ -265,6 +275,7 @@ uint64_t MESITopCC::processAccess(Address lineAddr, uint32_t lineId, AccessType 
     switch (type) {
         case PUTX:
             assert(e->isExclusive());
+            assert(!(flags & MemReq::PTEFETCH));
             if (flags & MemReq::PUTX_KEEPEXCL) {
                 assert(e->sharers[childId]);
                 assert(*childState == M);
@@ -273,6 +284,8 @@ uint64_t MESITopCC::processAccess(Address lineAddr, uint32_t lineId, AccessType 
             }
             //note NO break in general
         case PUTS:
+            assert(!(flags & MemReq::PTEFETCH));
+            // info("[tcc] PUT, child name: %s, child id: %d, lind id: %d", children[childId]->getName(), childId, lineId);
             assert(e->sharers[childId]);
             e->sharers[childId] = false;
             e->numSharers--;
@@ -287,7 +300,7 @@ uint64_t MESITopCC::processAccess(Address lineAddr, uint32_t lineId, AccessType 
                 *childState = E;
             } else {
                 //Give in S state
-                assert(e->sharers[childId] == false || (flags & MemReq::PTEFETCH));
+                assert(e->sharers[childId] == false);
 
                 if (e->isExclusive()) {
                     //Downgrade the exclusive sharer
@@ -296,18 +309,24 @@ uint64_t MESITopCC::processAccess(Address lineAddr, uint32_t lineId, AccessType 
 
                 assert_msg(!e->isExclusive(), "Can't have exclusivity here. isExcl=%d excl=%d numSharers=%d", e->isExclusive(), e->exclusive, e->numSharers);
 
-                e->sharers[childId] = true;
-                e->numSharers++;
+                // Don't change share states for PTEFETCH. TLBs gonna flush themselves to reflect exterior changes.
+                if (!(flags & MemReq::PTEFETCH)) {
+                    e->sharers[childId] = true;
+                    e->numSharers++;
+                }
+
                 e->exclusive = false; //dsm: Must set, we're explicitly non-exclusive
                 *childState = S;
             }
             break;
         case GETX:
             assert(haveExclusive); //the current cache better have exclusive access to this line
+            assert(!(flags & MemReq::PTEFETCH));
 
             // If child is in sharers list (this is an upgrade miss), take it out
             if (e->sharers[childId]) {
-                assert_msg(!e->isExclusive(), "Spurious GETX, childId=%d numSharers=%d isExcl=%d excl=%d", childId, e->numSharers, e->isExclusive(), e->exclusive);
+                assert_msg(!e->isExclusive(), "Spurious GETX, childId=%d numSharers=%d isExcl=%d excl=%d addr=%lx", childId, e->numSharers, e->isExclusive(), e->exclusive, lineAddr);
+                info("Invalidating child %s on line %ld", children[childId]->getName(), lineAddr);
                 e->sharers[childId] = false;
                 e->numSharers--;
             }

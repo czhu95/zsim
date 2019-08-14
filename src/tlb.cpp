@@ -7,6 +7,7 @@ TLB::TLB(uint32_t _numLines, CC* _cc, CacheArray* _array,
       invLat(_invLat), name(_name) {
         srcId = -1;
         reqFlags = MemReq::PTEFETCH;
+        cc->sinkTLB(false);
     }
 
 const char* TLB::getName()
@@ -48,7 +49,6 @@ uint64_t TLB::access(TLBReq& req)
     int32_t lineId = array->lookup(req.pageNum, nullptr, false);
     respCycle += accLat;
     if (lineId == -1) {
-        // info("TLB miss, pageNum: %lx, lineId: %d", req.pageNum, lineId);
         /* Find the line to insert. There is no need to write back. */
         Address WbAddr;
         lineId = array->preinsert(req.pageNum, nullptr, &WbAddr);
@@ -60,11 +60,14 @@ uint64_t TLB::access(TLBReq& req)
         MESIState dummyState = MESIState::I;
         MemReq mem_req = {pLineAddr, GETS, 0, &dummyState, respCycle, nullptr, dummyState, srcId, reqFlags};
 
+        cc->processEviction(mem_req, WbAddr, lineId, respCycle); //1. if needed, send invalidates/downgrades to lower level
+
         array->postinsert(req.pageNum, &mem_req, lineId);
 
         bool skipAccess = cc->startAccess(mem_req);
         assert(!skipAccess);
         respCycle = cc->processAccess(mem_req, lineId, respCycle);
+        // info("TLB miss, pageNum: %lx, penalty: %ld", req.pageNum, respCycle - req.cycle);
         cc->endAccess(mem_req);
     }
 

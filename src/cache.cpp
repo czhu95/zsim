@@ -65,12 +65,15 @@ uint64_t Cache::access(MemReq& req) {
         bool updateReplacement = (req.type == GETS) || (req.type == GETX);
         int32_t lineId = array->lookup(req.lineAddr, &req, updateReplacement);
         respCycle += accLat;
+        // if (req.flags & MemReq::PTEFETCH)
+        //     info("[%s] Fetching PTE.", name.c_str());
 
         if (lineId == -1 && cc->shouldAllocate(req)) {
             //Make space for new line
             Address wbLineAddr;
             lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr); //find the lineId to replace
             trace(Cache, "[%s] Evicting 0x%lx", name.c_str(), wbLineAddr);
+            // info("[%s] Evict 0x%lx for 0x%lx", name.c_str(), wbLineAddr, req.lineAddr);
 
             //Evictions are not in the critical path in any sane implementation -- we do not include their delays
             //NOTE: We might be "evicting" an invalid line for all we know. Coherence controllers will know what to do
