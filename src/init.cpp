@@ -628,6 +628,7 @@ static void InitSystem(Config& config) {
     unordered_map<string, vector<TLB*>> tlbMap;
     vector<const char*> tlbGroupNames;
     config.subgroups("sys.tlbs", tlbGroupNames);
+    bool hasPageWalker = false;
 
     for (const char* group : tlbGroupNames) {
         tlbMap[group] = vector<TLB*>();
@@ -636,7 +637,13 @@ static void InitSystem(Config& config) {
         // uint32_t tlbs = config.get<uint32_t>(prefix + "tlbs", 1);
         uint32_t numLines = config.get<uint32_t>(prefix + "lines", 64);
         uint32_t ways = config.get<uint32_t>(prefix + "array.ways", 4);
+        bool nonInclusiveHack = config.get<bool>(prefix + "nonInclusiveHack", false);
+        bool pageWalker = config.exists(prefix + "pageWalker");
+        uint32_t pageWalkLat = config.get<uint32_t>(prefix + "pageWalker.latency", 0);
         g_string name(group);
+
+        assert(!hasPageWalker || !pageWalker);
+        hasPageWalker |= pageWalker;
 
         if (grp_str == "mem") panic("'mem' is an invalid TLB group name");
         if (childMap.count(grp_str)) panic("Duplicate TLB group %s", group);
@@ -672,7 +679,11 @@ static void InitSystem(Config& config) {
         CacheArray* array = BuildCacheArray(arrayType, numLines, ways, replType, candidates, rp, hf);
 
         // Coherence Control
-        CC* cc = new MESITerminalCC(numLines, name);
+        CC* cc;
+        if (children.empty())
+            cc = new MESITerminalCC(numLines, name);
+        else
+            cc = new MESICC(numLines, nonInclusiveHack, name);
         rp->setCC(cc);
 
         // Latencies
@@ -681,6 +692,8 @@ static void InitSystem(Config& config) {
         uint32_t invLat = latency;
 
         TLB* tlb = new TLB(numLines, cc, array, rp, accLat, invLat, name);
+        if (pageWalker)
+            tlb->setPageWalker(pageWalkLat);
         tlbMap[group].push_back(tlb);
 
         // Also create cache group entry in cMap.
@@ -689,7 +702,11 @@ static void InitSystem(Config& config) {
         (*cgp)[0].resize(1);
         (*cgp)[0][0] = static_cast<BaseCache*>(tlb);
         cMap[group] = cgp;
+
+        // Append cacheGroupNames with tlb names.
+        cacheGroupNames.push_back(group);
     }
+    assert(hasPageWalker);
 
     //Check single LLC
     if (cMap[llc]->size() != 1) panic("Last-level cache %s must have caches = 1, but %ld were specified", llc.c_str(), cMap[llc]->size());
@@ -727,7 +744,6 @@ static void InitSystem(Config& config) {
     for (auto& it : parentMap) {
         bool found = false;
         for (auto& grp : cacheGroupNames) found |= it.first == grp;
-        for (auto& grp : tlbGroupNames) found |= it.first == grp;
         if (!found) panic("%s has invalid child %s", it.second.c_str(), it.first.c_str());
     }
 
@@ -742,7 +758,10 @@ static void InitSystem(Config& config) {
 
     // Rest of caches and TLB
     for (const char* grp : cacheGroupNames) {
-        if (isTerminal(grp)) continue; //skip terminal caches
+        if (isTerminal(grp)) {
+            info("Skipping terminal cache/tlb %s", grp);
+            continue; //skip terminal caches
+        }
 
         CacheGroup& parentCaches = *cMap[grp];
         uint32_t parents = parentCaches.size();
@@ -903,12 +922,14 @@ static void InitSystem(Config& config) {
                         assert(it);
                         it->setSourceId(coreIdx);
                         it->setFlags(MemReq::IFETCH | MemReq::NOEXCL);
+                        assignedCaches[itlb]++;
                     }
                     if (dtlb != "null") {
                         dt = tlbMap[dtlb][0];
                         assert(dt);
                         dt->setSourceId(coreIdx);
                         dt->setFlags(MemReq::NOEXCL);
+                        assignedCaches[dtlb]++;
                     }
 
                     //Build the core

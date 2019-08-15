@@ -76,7 +76,10 @@ inline bool IsPut(AccessType t) { return t == PUTS || t == PUTX; }
 
 /* Memory request */
 struct MemReq {
-    Address lineAddr;
+    union {
+        Address lineAddr;
+        Address pageNum;
+    };
     AccessType type;
     uint32_t childId;
     MESIState* state;
@@ -111,12 +114,6 @@ struct InvReq {
     InvType type;
     // NOTE: writeback should start false, children pull it up to true
     bool* writeback;
-    uint64_t cycle;
-    uint32_t srcId;
-};
-
-struct TLBReq {
-    Address pageNum;
     uint64_t cycle;
     uint32_t srcId;
 };

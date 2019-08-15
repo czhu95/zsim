@@ -61,6 +61,8 @@ void Cache::initCacheStats(AggregateStat* cacheStat) {
 uint64_t Cache::access(MemReq& req) {
     uint64_t respCycle = req.cycle;
     bool skipAccess = cc->startAccess(req); //may need to skip access due to races (NOTE: may change req.type!)
+
+    // info("[%s] Access 0x%lx", name.c_str(), req.lineAddr);
     if (likely(!skipAccess)) {
         bool updateReplacement = (req.type == GETS) || (req.type == GETX);
         int32_t lineId = array->lookup(req.lineAddr, &req, updateReplacement);
@@ -72,7 +74,7 @@ uint64_t Cache::access(MemReq& req) {
             //Make space for new line
             Address wbLineAddr;
             lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr); //find the lineId to replace
-            trace(Cache, "[%s] Evicting 0x%lx", name.c_str(), wbLineAddr);
+            // trace(Cache, "[%s] Evicting 0x%lx", name.c_str(), wbLineAddr);
             // info("[%s] Evict 0x%lx for 0x%lx", name.c_str(), wbLineAddr, req.lineAddr);
 
             //Evictions are not in the critical path in any sane implementation -- we do not include their delays

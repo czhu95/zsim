@@ -48,6 +48,9 @@ class TLB : public BaseCache {
         //Latencies
         uint32_t accLat; //latency of a normal access (could split in get/put, probably not needed)
         uint32_t invLat; //latency of an invalidation
+
+        // Page Walker
+        bool pageWalk;
         uint32_t pageWalkLat;
 
         uint32_t srcId; //should match the core
@@ -61,6 +64,7 @@ class TLB : public BaseCache {
 
         void setSourceId(uint32_t id) { srcId = id; }
         void setFlags(uint32_t flags) { reqFlags = flags | MemReq::PTEFETCH; }
+        void setPageWalker(uint32_t _pageWalkLat) { pageWalk = true; pageWalkLat = _pageWalkLat; }
 
         const char* getName() override;
         void setParents(uint32_t _childId, const g_vector<MemObject*>& parents, Network* network) override;
@@ -68,8 +72,7 @@ class TLB : public BaseCache {
         void initStats(AggregateStat* parentStat);
 
         uint64_t translate(Address vAddr, uint64_t curCycle);
-        uint64_t access(TLBReq& req);
-        uint64_t access(MemReq& req) override { panic("TLB should not be accessed by memory."); };
+        uint64_t access(MemReq& req) override;
 
         uint64_t invalidate(const InvReq& req) override;
 

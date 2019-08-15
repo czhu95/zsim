@@ -343,7 +343,7 @@ class MESICC : public CC {
 
         uint64_t processEviction(const MemReq& triggerReq, Address wbLineAddr, int32_t lineId, uint64_t startCycle) {
             bool lowerLevelWriteback = false;
-            bool isPTE = triggerReq.flags & MemReq::PTEFETCH & !sinkTLBReq;
+            bool isPTE = (triggerReq.flags & MemReq::PTEFETCH) && !sinkTLBReq;
             uint64_t evCycle = startCycle;
             if (!isPTE)
                 evCycle = tcc->processEviction(wbLineAddr, lineId, &lowerLevelWriteback, startCycle, triggerReq.srcId); //1. if needed, send invalidates/downgrades to lower level
