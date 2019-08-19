@@ -39,10 +39,10 @@ uint64_t TLB::translate(Address vAddr, uint64_t curCycle)
 {
     Address vPageNum = vAddr >> pageBits;
     Address pPageNum = procMask | vPageNum;
-    // info("Translating vAddr: %lx, vPageNum: %lx, pPageNum: %lx", vAddr, vPageNum, pPageNum);
     MESIState dummyState = MESIState::I;
     MemReq req = {pPageNum, GETS, 0, &dummyState, curCycle, nullptr, dummyState, srcId, reqFlags};
     uint64_t respCycle = access(req);
+    // info("Translating vAddr: %lx, vPageNum: %lx, pPageNum: %lx, penalty: %lu", vAddr, vPageNum, pPageNum, respCycle - curCycle);
     return respCycle;
 }
 
@@ -50,36 +50,38 @@ uint64_t TLB::access(MemReq& req)
 {
     uint64_t respCycle = req.cycle;
     bool skipAccess = cc->startAccess(req); //may need to skip access due to races (NOTE: may change req.type!)
+
     if (likely(!skipAccess)) {
-    }
+        int32_t lineId = array->lookup(req.pageNum, nullptr, false);
 
-    int32_t lineId = array->lookup(req.pageNum, nullptr, false);
+        // info("[%s] Translating page 0x%lx", name.c_str(), req.pageNum);
+        respCycle += accLat;
+        // info("[%s] TLB latency: %u", name.c_str(), accLat);
+        bool accessed = false;
+        if (lineId == -1) {
+            /* Find the line to insert. There is no need to write back. */
+            Address WbAddr;
+            lineId = array->preinsert(req.pageNum, nullptr, &WbAddr);
+            // info("[%s] Evict TLB entry 0x%lx for 0x%lx", name.c_str(), WbAddr, req.pageNum);
+            respCycle = cc->processEviction(req, WbAddr, lineId, respCycle);
 
-    // info("[%s] Translating page 0x%lx", name.c_str(), req.pageNum);
-    respCycle += accLat;
-    bool accessed = false;
-    if (lineId == -1) {
-        /* Find the line to insert. There is no need to write back. */
-        Address WbAddr;
-        lineId = array->preinsert(req.pageNum, nullptr, &WbAddr);
-        // info("[%s] Evict TLB entry 0x%lx for 0x%lx", name.c_str(), WbAddr, req.pageNum);
-        respCycle = cc->processEviction(req, WbAddr, lineId, respCycle);
+            if (pageWalk) {
+                /* Generate a MemReq to get PTE. */
+                Address pLineAddr = (req.pageNum / pteSize) >> lineBits;
+                // info("pLineAddr: %lx", pLineAddr);
+                respCycle += pageWalkLat;
+                // info("[%s] PageWalk latency: %u", name.c_str(), pageWalkLat);
+                MemReq mem_req = {pLineAddr, GETS, 0, req.state, respCycle, nullptr, *req.state, req.srcId, req.flags};
+                respCycle = cc->processAccess(mem_req, lineId, respCycle);
+                accessed = true;
+            }
 
-        if (pageWalk) {
-            /* Generate a MemReq to get PTE. */
-            Address pLineAddr = (req.pageNum / pteSize) >> lineBits;
-            // info("pLineAddr: %lx", pLineAddr);
-            respCycle += pageWalkLat;
-            MemReq mem_req = {pLineAddr, GETS, 0, req.state, respCycle, nullptr, *req.state, req.srcId, req.flags};
-            respCycle = cc->processAccess(mem_req, lineId, respCycle);
-            accessed = true;
+            array->postinsert(req.pageNum, &req, lineId);
         }
 
-        array->postinsert(req.pageNum, &req, lineId);
+        if (!accessed)
+            respCycle = cc->processAccess(req, lineId, respCycle);
     }
-
-    if (!accessed)
-        respCycle = cc->processAccess(req, lineId, respCycle);
 
     cc->endAccess(req);
 

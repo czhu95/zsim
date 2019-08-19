@@ -688,8 +688,9 @@ static void InitSystem(Config& config) {
 
         // Latencies
         uint32_t latency = config.get<uint32_t>(prefix + "latency", 10);
-        uint32_t accLat = 0; // TLB translates latency hidden by l1 cache.
+        uint32_t accLat = children.empty() ? 0 : latency; // TLB translates latency hidden by l1 cache.
         uint32_t invLat = latency;
+        // info("[%s] accLat: %u, invLat: %u", group, accLat, invLat);
 
         TLB* tlb = new TLB(numLines, cc, array, rp, accLat, invLat, name);
         if (pageWalker)
